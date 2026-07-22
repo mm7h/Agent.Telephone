@@ -48,7 +48,13 @@ namespace Agent.Telephone
                 services.AddSingleton(connectionStore);
 
             })
-            .RegisterLogger(config);
+            .RegisterLogger(config)
+            .RegisterResources(config)
+            .RegisterDevices()
+            .RegisterProviders(config)
+            .RegisterHandlers()
+            .RegisterObjectPools()
+            .RegisterProtocol(config);
 
 #if DEBUG
             this.HostBuilder.UseEnvironment("Development");

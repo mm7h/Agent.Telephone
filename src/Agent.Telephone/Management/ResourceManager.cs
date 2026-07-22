@@ -7,6 +7,7 @@ using Agent.Telephone.Resources.OnnxModels.VAD;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using SIPSorceryMedia.FFmpeg;
 
 namespace Agent.Telephone.Management
 {
@@ -15,8 +16,9 @@ namespace Agent.Telephone.Management
         public ResourceManager(IServiceProvider serviceProvider, TelephoneConfig config, ILogger<ResourceManager> logger) : base(serviceProvider, config, logger)
         {
         }
-        public static IHostBuilder RegisterServices(IHostBuilder builder)
+        public static IHostBuilder RegisterServices(IHostBuilder builder, TelephoneConfig config)
         {
+            FFmpegInit.Initialise(FfmpegLogLevelEnum.AV_LOG_FATAL, config.SIPConfig.FFmpegPath);
             return builder.ConfigureServices((context, services) =>
             {
                 services.AddSingleton<IVadOnnxModel, SileroOnnx>();
@@ -37,7 +39,7 @@ namespace Agent.Telephone.Management
             }
             #endregion
 
-            return true;
+            return FFmpegInit.EnsureBinariesRegistered();
         }
         private ModelSetting GetSelectedSetting(string selectedModelType, ModelConfig config)
         {

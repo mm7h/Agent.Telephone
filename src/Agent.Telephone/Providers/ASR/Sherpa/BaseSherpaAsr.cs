@@ -4,6 +4,7 @@ using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Helpers;
 using Agent.Telephone.Providers.ASR.Contexts;
 using Agent.Telephone.Resources;
+using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.Logging;
 using SherpaOnnx;
 using System.Collections.Concurrent;
@@ -11,7 +12,7 @@ using System.Threading.Channels;
 
 namespace Agent.Telephone.Providers.ASR.Sherpa
 {
-    internal abstract class BaseSherpaAsr<TLogger> : BaseProvider<TLogger, ModelSetting>
+    internal abstract class BaseSherpaAsr<TLogger> : BaseProvider<TLogger, ModelSetting>, IAsr
     {
         private readonly IAudioEditor _audioEditor;
         private readonly ConcurrentDictionary<string, IAsrEventCallback> _asrSessions;
@@ -84,7 +85,7 @@ namespace Agent.Telephone.Providers.ASR.Sherpa
             return this._asrSessions.ContainsKey(deviceId);
         }
 
-        public async Task ConvertSpeechTextAsync(Workflow<float[]> workflow, int sampleRate, int frameSize, CancellationToken token)
+        public async Task ConvertSpeechTextAsync(Workflow<float[]> workflow, int sampleRate, CancellationToken token)
         {
             if (!this.CheckDeviceRegistered(workflow.DeviceId))
             {
@@ -119,7 +120,7 @@ namespace Agent.Telephone.Providers.ASR.Sherpa
                     offlineStream = this._offlineRecognizer.CreateStream();
                     offlineStream.AcceptWaveform(sampleRate, workflow.Data);
 
-                    AsrRequest asrRequest = new AsrRequest(workflow.DeviceId, offlineStream, sampleRate, frameSize, callback, token);
+                    AsrRequest asrRequest = new AsrRequest(workflow.DeviceId, offlineStream, sampleRate, callback, token);
 
                     await this._requestChannel.Writer.WriteAsync(asrRequest, token);
                     offlineStream = null;
@@ -143,11 +144,7 @@ namespace Agent.Telephone.Providers.ASR.Sherpa
 
         private string GenerateAudioFileName<T>(Workflow<T> workflow)
         {
-            string devicePart = workflow.DeviceId;
-            //return $"{devicePart}_{workflow.TurnId}";
-
-            //todo
-            return devicePart;
+            return $"{this.DeviceId}_{workflow.TurnId}";
         }
 
         private async Task Processing()

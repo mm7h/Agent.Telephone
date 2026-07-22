@@ -1,45 +1,45 @@
-﻿using SIPSorcery.Media;
+using Agent.Telephone.Abstractions.Configs;
+using Agent.Telephone.Helpers;
 using SIPSorcery.SIP;
-using SIPSorcery.SIP.App;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Agent.Telephone.Common.Contexts
 {
-    internal class DeviceContext : IDisposable
+    internal sealed class DeviceContext : IDisposable
     {
         private readonly SIPTransport _sipTransport;
 
-        public DeviceContext(string deviceId, SIPTransport sipTransport, SIPRequest sipRequest)
+        public DeviceContext(SIPTransport sipTransport, SIPRequest sipRequest, List<AssistantConfig> availableAssistants)
         {
-            this.DeviceId = deviceId;
-            this.Contact = sipRequest.URI;
-            this.RemoteEndPoint = sipRequest.RemoteSIPEndPoint;
-            this.AIAgent = new AIAgentContext();
-
             this._sipTransport = sipTransport;
+
+            this.DeviceId = sipRequest.GetDeviceId();
+            this.Contact = sipRequest.URI;
+            this.AvailableAssistants = availableAssistants.ToDictionary(i => i.DialingNumber).AsReadOnly();
+            this.RemoteEndPoint = sipRequest.RemoteSIPEndPoint;
+            this.AudioInPacket = new AudioInPacket();
+            this.AudioOutputPacket = new AudioOutputPacket();
         }
 
-        public string DeviceId { get; private set; }
-        public SIPURI Contact { get; private set; }
-
-        public SIPEndPoint RemoteEndPoint { get; private set; }
+        public string DeviceId { get; }
+        public SIPURI Contact { get; set; }
+        public SIPEndPoint RemoteEndPoint { get; set; }
+        public AudioInPacket AudioInPacket { get; }
+        public AudioOutputPacket AudioOutputPacket { get; }
         public ActiveCallContext? ActiveCall { get; private set; }
-        public AIAgentContext AIAgent { get; private set; }
+        public IReadOnlyDictionary<string, AssistantConfig> AvailableAssistants { get; }
+
         public void InitializeCallSession(SIPRequest sipRequest)
         {
-
-            this.ActiveCall = new ActiveCallContext(this._sipTransport);
-
+            this.CloseCallSession();
+            this.ActiveCall = new ActiveCallContext(this._sipTransport, sipRequest, this);
         }
 
-        public void Dispose()
+        public void CloseCallSession()
         {
-
+            this.ActiveCall?.Dispose();
+            this.ActiveCall = null;
         }
 
+        public void Dispose() => this.CloseCallSession();
     }
 }

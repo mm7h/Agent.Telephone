@@ -48,6 +48,37 @@ namespace Agent.Telephone.Helpers
             }
         }
 
+        public static float[] PcmShortToFloat(this short[] pcmShortBytes)
+        {
+            if (pcmShortBytes == null || pcmShortBytes.Length == 0)
+                return Array.Empty<float>();
+
+            float[] pcmFloatBytes = new float[pcmShortBytes.Length];
+            for (int i = 0; i < pcmShortBytes.Length; i++)
+            {
+                pcmFloatBytes[i] = pcmShortBytes[i] / 32768f;
+            }
+
+            return pcmFloatBytes;
+        }
+
+        public static short[] PcmFloatToShort(this float[] pcmFloatBytes)
+        {
+            if (pcmFloatBytes == null || pcmFloatBytes.Length == 0)
+                return Array.Empty<short>();
+
+            short[] pcmShortBytes = new short[pcmFloatBytes.Length];
+            for (int i = 0; i < pcmFloatBytes.Length; i++)
+            {
+                float sample = Math.Clamp(pcmFloatBytes[i], -1f, 1f);
+                pcmShortBytes[i] = sample >= 1f
+                    ? short.MaxValue
+                    : (short)(sample * 32768f);
+            }
+
+            return pcmShortBytes;
+        }
+
         /// <summary>
         /// 将16-bit little-endian PCM字节转换为归一化float（-1f~1f）。
         /// </summary>

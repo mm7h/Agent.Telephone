@@ -79,7 +79,6 @@ namespace XiaoZhi.Net.Telephone.Sample.Server
                 Console.WriteLine($"[{Ts}] 来电已取消（摘机前挂断）");
 
             int callCount = 0;
-
             ua.OnIncomingCall += async (agent, req) =>
             {
                 

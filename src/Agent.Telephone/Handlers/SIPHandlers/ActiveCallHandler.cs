@@ -1,76 +1,61 @@
-﻿using Agent.Telephone.Common.Constants;
-using Agent.Telephone.Common.Contexts;
+using Agent.Telephone.Abstractions.Configs;
+using Agent.Telephone.Common.Constants;
 using Microsoft.Extensions.Logging;
 using SIPSorcery.SIP;
-using SIPSorcery.SIP.App;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Agent.Telephone.Handlers.SIPHandlers
 {
-    internal class ActiveCallHandler : BaseHandler
+    internal sealed class ActiveCallHandler : BaseHandler
     {
-        private SIPUserAgent? _sipUserAgent;
 
-        public ActiveCallHandler(IServiceProvider serviceProvider, ILogger<ActiveCallHandler> logger) : base(serviceProvider, logger)
-        {
-        }
+        public ActiveCallHandler(TelephoneConfig config, ILogger<ActiveCallHandler> logger) : base(config, logger) { }
+
         public override string HandlerName => HandlerNames.ActiveCallHandlerName;
 
-        public override bool Build(DeviceContext deviceContext)
+        public override bool Build()
         {
-            if (deviceContext.ActiveCall is null)
+            if (this.DeviceContext.ActiveCall is null)
             {
-
+                this.Logger.LogError("设备 {deviceId} 没有活动呼叫上下文。", this.DeviceContext.DeviceId);
                 return false;
             }
-            this._sipUserAgent = deviceContext.ActiveCall.UserAgent;
-            this._sipUserAgent.OnIncomingCall += this.OnIncomingCall;
-            this._sipUserAgent.ClientCallRinging += this.OnClientCallRinging;
-            this._sipUserAgent.ServerCallCancelled += this.OnServerCallCancelled;
-            this._sipUserAgent.OnDtmfTone += this.OnDtmfTone;
-            this._sipUserAgent.OnCallHungup += this.OnCallHungup;
-
+            this.DeviceContext.ActiveCall.UserAgent.OnCallHungup += this.OnCallHungup;
+            this.DeviceContext.ActiveCall.UserAgent.ServerCallCancelled += this.OnServerCallCancelled;
             return true;
         }
 
-        private void OnIncomingCall(SIPUserAgent sipUserAgent, SIPRequest sipRequest)
+        public async Task<bool> AnswerAsync(SIPRequest request)
         {
-
+            if (this.DeviceContext.ActiveCall is null)
+            {
+                this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法应答。", this.DeviceContext.DeviceId);
+                return false;
+            }
+            var serverAgent = this.DeviceContext.ActiveCall.UserAgent.AcceptCall(request);
+            bool answered = await this.DeviceContext.ActiveCall.UserAgent.Answer(serverAgent, this.DeviceContext.ActiveCall.VoIPRTP);
+            if (!answered || this.DeviceContext.ActiveCall.NegotiatedAudioFormat.IsEmpty())
+            {
+                this.Logger.LogWarning("设备 {deviceId} 未能协商 PCMU/PCMA 音频。", this.DeviceContext.DeviceId);
+                return false;
+            }
+            return true;
         }
 
-        private void OnClientCallRinging(ISIPClientUserAgent uac, SIPResponse sipResponse)
+        private void OnCallHungup(SIPDialogue dialogue)
         {
-
+            this.DeviceContext.CloseCallSession();
         }
-
-        private void OnServerCallCancelled(ISIPServerUserAgent uas, SIPRequest cancelRequest)
+        private void OnServerCallCancelled(SIPSorcery.SIP.App.ISIPServerUserAgent agent, SIPRequest request)
         {
-
-        }
-
-        private void OnDtmfTone(byte tone, int duration)
-        {
-
-        }
-
-        private void OnCallHungup(SIPDialogue sipDialogue)
-        {
-
+            this.DeviceContext.CloseCallSession();
         }
 
         public override void Dispose()
         {
-            if (_sipUserAgent is not null)
+            if (this.DeviceContext.ActiveCall is not null)
             {
-                this._sipUserAgent.OnIncomingCall -= this.OnIncomingCall;
-                this._sipUserAgent.ClientCallRinging -= this.OnClientCallRinging;
-                this._sipUserAgent.ServerCallCancelled -= this.OnServerCallCancelled;
-                this._sipUserAgent.OnDtmfTone -= this.OnDtmfTone;
-                this._sipUserAgent.OnCallHungup -= this.OnCallHungup;
+                this.DeviceContext.ActiveCall.UserAgent.OnCallHungup -= this.OnCallHungup;
+                this.DeviceContext.ActiveCall.UserAgent.ServerCallCancelled -= this.OnServerCallCancelled;
             }
         }
     }

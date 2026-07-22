@@ -2,6 +2,7 @@
 using Agent.Telephone.Common.Contexts;
 using Microsoft.Extensions.Logging;
 using SIPSorcery.SIP;
+using System.Text.RegularExpressions;
 
 namespace Agent.Telephone.Management
 {
@@ -18,10 +19,25 @@ namespace Agent.Telephone.Management
         public TelephoneConfig Config { get; }
 
         public abstract bool BuildComponent();
+        public static string ConvertToKebabCase(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+                return input;
 
-        public virtual void OnSIPDeviceRegistering(SIPTransport sipTransport, SIPRequest sipRequest) { }
-        public virtual void OnSIPDeviceRegistered(DeviceContext deviceContext, SIPTransport sipTransport, SIPRequest sipRequest) { }
-        public virtual void OnSIPDeviceUnregister(DeviceContext deviceContext, SIPTransport sipTransport, SIPRequest sipRequest) { }
+            return Regex.Replace(input, "(?<!^)([A-Z])", "-$1").ToLower();
+        }
+        public virtual Task OnSIPDeviceRegisteringAsync(SIPTransport sipTransport, SIPRequest sipRequest)
+        {
+            return Task.CompletedTask;
+        }
+        public virtual Task<bool> OnSIPDeviceRegisteredAsync(DeviceContext deviceContext, SIPTransport sipTransport, SIPRequest sipRequest)
+        {
+            return Task.FromResult(true);
+        }
+        public virtual Task OnSIPDeviceUnregisterAsync(DeviceContext deviceContext, SIPTransport sipTransport, SIPRequest sipRequest)
+        {
+            return Task.CompletedTask;
+        }
 
         public virtual void Dispose()
         { }

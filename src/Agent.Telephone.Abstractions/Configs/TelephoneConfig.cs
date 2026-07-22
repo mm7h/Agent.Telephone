@@ -6,15 +6,16 @@
         {
             this.SIPConfig = default!;
             this.ModelConfig = default!;
+            this.AssistantConfigs = [];
+            this.LogSetting = new();
         }
 
         public bool AuthEnabled { get; set; }
-        public LogSetting LogSetting { get; set; } = new LogSetting();
-        public SIPConfig SIPConfig { get; init; }
-        public ModelConfig ModelConfig { get; init; }
+        public LogSetting LogSetting { get; set; }
+        public SIPConfig SIPConfig { get; set; }
+        public List<AssistantConfig> AssistantConfigs { get; set; }
+        public ModelConfig ModelConfig { get; set; }
     }
-
-
 
     #region Log
     public sealed class LogSetting

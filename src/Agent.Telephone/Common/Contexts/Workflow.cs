@@ -3,7 +3,7 @@
     internal class Workflow<T>
     {
         private string _deviceId = null!;
-        //private long _turnId;
+        private long _turnId;
         private T _data = default!;
 
         public Workflow()
@@ -11,7 +11,7 @@
         }
 
         public string DeviceId => this._deviceId;
-        //public long TurnId => this._turnId;
+        public long TurnId => this._turnId;
         public T Data => this._data;
 
 
@@ -19,14 +19,14 @@
         {
             this._deviceId = context.DeviceId;
             this._data = data;
-            //this._turnId = context.TurnId;
+            this._turnId = context.ActiveCall?.TurnId ?? 0;
         }
 
         public void Reset()
         {
             this._deviceId = null!;
             this._data = default!;
-            //this._turnId = 0;
+            this._turnId = 0;
         }
     }
 }

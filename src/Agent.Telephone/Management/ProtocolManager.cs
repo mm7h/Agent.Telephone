@@ -24,7 +24,6 @@ namespace Agent.Telephone.Management
             {
                 services.RegisterSIPServerServices(config);
 
-                services.AddSingleton<ProviderManager>();
             });
         }
 

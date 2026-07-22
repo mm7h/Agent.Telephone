@@ -1,0 +1,181 @@
+{
+  "AuthEnabled": false,
+  "LogSetting": {
+    "LogLevel": "DEBUG",
+    "LogFilePath": "./logs/log.txt",
+    "OutputTemplate": "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u4}] {Message:l}{NewLine}{Exception}",
+    "RetainedFileCountLimit": 30
+  },
+  "SIPConfig": {
+    "IP": "0.0.0.0",
+    "Port": 5060,
+    "FFmpegPath": "./ffmpeg/"
+  },
+  "AssistantConfigs": [
+    {
+      "GuestServiceAgent": true,
+      "DialingNumber": "10086",
+      "Name": "DefaultAssistant 1",
+      "Prompt": "",
+      "VAD": "SileroNative",
+      "ASR": "SenseVoice",
+      "Intent": "IntentLlm",
+      "LLM": "Chatglm",
+      "TTS": "HuoshanBidirection",
+      "Memory": "FlashMemory"
+    },
+    {
+      "GuestServiceAgent": false,
+      "DialingNumber": "10085",
+      "Name": "DefaultAssistant 2",
+      "Prompt": "",
+      "VAD": "SileroNative",
+      "ASR": "SenseVoice",
+      "Intent": "IntentLlm",
+      "LLM": "Chatglm",
+      "TTS": "HuoshanBidirection",
+      "Memory": "FlashMemory"
+    }
+  ],
+  "ModelConfig": {
+    "SelectedSettings": {
+      "VAD": "SileroNative",
+      "ASR": "SenseVoice",
+      "Intent": "IntentLlm",
+      "LLM": "Chatglm",
+      "TTS": "HuoshanBidirection",
+      "Memory": "FlashMemory"
+    },
+    "ConfiguredSettings": {
+      "VAD": {
+        "Silero": {
+          "Threshold": 0.5,
+          "SilenceThresholdSecond": 0.7,
+          "MinSpeechDurationSecond": 0.5,
+          "MaxSpeechDurationSecond": 60,
+          // 间隔多久没有检测到声音就断开连接，单位毫秒
+          "CloseConnectionNoVoiceTime": 120000
+        },
+        "SileroNative": {
+          "SilenceThresholdSecond": 0.7,
+          "Threshold": 0.5,
+          "ThresholdLow": 0.2,
+          "CloseConnectionNoVoiceTime": 120000
+        }
+      },
+      "ASR": {
+        "SenseVoice": {
+          "UseInverseTextNormalization": 1,
+          "DecodingMethod": "greedy_search",
+          // MaxBatchSize和BatchWaitTimeMs两个参数谁先满足就会触发ASR识别
+          "MaxBatchSize": 10, //对于批量ASR识别，每轮处理周期最大能够处理的音频数量
+          "BatchWaitTimeMs": 50, //对于批量ASR识别，每轮处理周期最大的等待时间，单位毫秒
+          "FileSavingOption": {
+            "SaveFile": true,
+            "SavePath": "./data/asr-cache",
+            "Format": "mp3"
+          }
+        },
+        "Paraformer": {
+          "FileSavingOption": {
+            "SaveFile": true
+            // 未设置的话，剩下的属性将保持如下默认值
+            /*
+          "SavePath": "./data/audio-cache",
+          "Format": "wav"
+          */
+          }
+        }
+      },
+      "LLM": {
+        "Chatglm": {
+          "BaseUrl": "https://open.bigmodel.cn/api/paas/v4/",
+          "ApiKey": "to your llm api key",
+          "ModelName": "glm-4-flash"
+        },
+        // Deepseek对json序列化的结果无法支持
+        "Deepseek": {
+          "BaseUrl": "https://api.deepseek.com",
+          "ApiKey": "to your llm api key",
+          "ModelName": "deepseek-v4-flash"
+        },
+        "Doubao": {
+          "BaseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+          "ApiKey": "to your llm api key",
+          "ModelName": "doubao-1-5-pro-32k-250115"
+        },
+        "Qwen": {
+          "BaseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "ApiKey": "to your llm api key",
+          "ModelName": "qwen-flash"
+        }
+      },
+      "TTS": {
+        "Kokoro": {
+          "Lexicons": "./lexicon/lexicon-zh.txt,./lexicon/lexicon-us-en.txt",
+          "FileSavingOption": {
+            "SaveFile": true,
+            "SavePath": "./data/tts-cache",
+            "Format": "pcm"
+          }
+        },
+        "HuoshanBidirection": {
+          "AppId": "to your api id",
+          "AccessToken": "to your access token",
+          "ResourceId": "volc.service_type.10029",
+          "Speaker": "zh_female_cancan_mars_bigtts",
+          "SpeechRate": 0,
+          "LoudnessRate": 0,
+          "FileSavingOption": {
+            "SaveFile": true,
+            "SavePath": "./data/tts-cache",
+            "Format": "pcm"
+          }
+        },
+        "HuoshanHttp": {
+          "AppId": "to your api id",
+          "AccessToken": "to your access token",
+          "Cluster": "volcano_tts",
+          "Speaker": "zh_female_cancan_mars_bigtts",
+          "SpeedRatio": 1.0,
+          "VolumeRatio": 1.0,
+          "PitchRatio": 1.0,
+          "FileSavingOption": {
+            "SaveFile": true,
+            "SavePath": "./data/tts-cache",
+            "Format": "mp3"
+          }
+        },
+        "HuoshanHttpV3": {
+          "AppId": "to your api id",
+          "AccessToken": "to your access token",
+          "ResourceId": "volc.service_type.10029",
+          "Speaker": "zh_female_cancan_mars_bigtts",
+          "SpeechRate": 0,
+          "LoudnessRate": 0,
+          "FileSavingOption": {
+            "SaveFile": true,
+            "SavePath": "./data/tts-cache",
+            "Format": "mp3"
+          }
+        }
+      },
+      "Intent": {
+        "None": {
+          "Type": "None"
+        },
+        "IntentLlm": {
+          "Type": "IntentLlm",
+          "LLM": "Qwen"
+        },
+        "FunctionCall": {
+          "Type": "FunctionCall"
+        }
+      },
+      "Memory": {
+        "FlashMemory": {}
+      }
+    },
+    "McpSettings": {}
+  }
+}

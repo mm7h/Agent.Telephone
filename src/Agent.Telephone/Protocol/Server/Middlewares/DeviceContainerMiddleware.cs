@@ -1,84 +1,88 @@
-﻿using Agent.Telephone.Common.Contexts;
+using Agent.Telephone.Abstractions;
+using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Management;
 using Microsoft.Extensions.Logging;
 using SIPSorcery.SIP;
 
 namespace Agent.Telephone.Protocol.Server.Middlewares
 {
-    internal class DeviceContainerMiddleware
+    internal sealed class DeviceContainerMiddleware
     {
         private SIPTransport? _sipTransport;
 
-        private readonly DeviceManager _deviceManager;
+        private readonly IBasicVerify _basicVerify;
+        private readonly DeviceContextManager _deviceManager;
         private readonly HandlerManager _handlerManager;
         private readonly ProviderManager _providerManager;
         private readonly ILogger<DeviceContainerMiddleware> _logger;
-        public DeviceContainerMiddleware(DeviceManager deviceManager, HandlerManager handlerManager, ProviderManager providerManager, ILogger<DeviceContainerMiddleware> logger)
+
+        public DeviceContainerMiddleware(IBasicVerify basicVerify,
+            DeviceContextManager deviceManager, 
+            HandlerManager handlerManager, 
+            ProviderManager providerManager, 
+            ILogger<DeviceContainerMiddleware> logger)
         {
+            this._basicVerify = basicVerify;
             this._deviceManager = deviceManager;
             this._handlerManager = handlerManager;
             this._providerManager = providerManager;
             this._logger = logger;
         }
+
         public void SubscribeSIPTransportEvents(SIPTransport sipTransport)
         {
             this._sipTransport = sipTransport;
-            this._sipTransport.SIPTransportRequestReceived += this.OnRequestReceivedAsync;
+            sipTransport.SIPTransportRequestReceived += this.OnRequestReceivedAsync;
         }
 
-        public void UnsubscribeSIPTransportEvents(SIPTransport sipTransport)
-        {
-            if (this._sipTransport is not null)
-            {
-                this._sipTransport.SIPTransportRequestReceived -= this.OnRequestReceivedAsync;
-            }
-        }
+        public void UnsubscribeSIPTransportEvents(SIPTransport sipTransport) => sipTransport.SIPTransportRequestReceived -= this.OnRequestReceivedAsync;
 
-        private Task OnRequestReceivedAsync(SIPEndPoint localSIPEndPoint, SIPEndPoint remoteEndPoint, SIPRequest sipRequest)
+        private async Task OnRequestReceivedAsync(SIPEndPoint local, SIPEndPoint remote, SIPRequest request)
         {
-            if (this._sipTransport is null)
-            {
-
-                return Task.CompletedTask;
-            }
-            switch (sipRequest.Method)
+            if (this._sipTransport is null) return;
+            switch (request.Method)
             {
                 case SIPMethodsEnum.REGISTER:
-                    this.RegisterSIPDevice(this._sipTransport, sipRequest);
+                    await this.RegisterSIPDeviceAsync(this._sipTransport, request);
                     break;
                 case SIPMethodsEnum.INVITE:
-                    this.InviteSIPDevice(this._sipTransport, sipRequest);
+                    await this.InviteSIPDeviceAsync(this._sipTransport, request);
                     break;
                 case SIPMethodsEnum.BYE:
-                    this.UnregisterSIPDevice(this._sipTransport, sipRequest);
+                    this.UnregisterSIPDevice(request);
                     break;
             }
-            return Task.CompletedTask;
         }
 
-        public bool RegisterSIPDevice(SIPTransport sipTransport, SIPRequest sipRequest)
+        private async Task RegisterSIPDeviceAsync(SIPTransport transport, SIPRequest request)
         {
-            this._deviceManager.OnSIPDeviceRegistering(sipTransport, sipRequest);
-            this._handlerManager.OnSIPDeviceRegistering(sipTransport, sipRequest);
-            this._providerManager.OnSIPDeviceRegistering(sipTransport, sipRequest);
-
-
-
-
-            return true;
+            await this._deviceManager.OnSIPDeviceRegisteringAsync(transport, request);
+            var response = SIPResponse.GetResponse(request, SIPResponseStatusCodesEnum.Ok, null);
+            response.Header.Contact = request.Header.Contact;
+            await transport.SendResponseAsync(response);
         }
 
-        public bool InviteSIPDevice(SIPTransport sipTransport, SIPRequest sipRequest)
+        private async Task InviteSIPDeviceAsync(SIPTransport transport, SIPRequest request)
         {
-            DeviceContext deviceContext = null!;
-            this._handlerManager.OnSIPDeviceRegistered(deviceContext, sipTransport, sipRequest);
-            this._providerManager.OnSIPDeviceRegistered(deviceContext, sipTransport, sipRequest);
-            return true;
+            DeviceContext? device = this._deviceManager.GetSIPDeviceById(request);
+            if (device is null)
+            {
+                await transport.SendResponseAsync(SIPResponse.GetResponse(request, SIPResponseStatusCodesEnum.Forbidden, "Device is not registered"));
+                return;
+            }
+
+            device.InitializeCallSession(request);
+
+            if (!await this._providerManager.OnSIPDeviceRegisteredAsync(device, transport, request) || !await this._handlerManager.OnSIPDeviceRegisteredAsync(device, transport, request))
+            {
+                device.CloseCallSession();
+                await transport.SendResponseAsync(SIPResponse.GetResponse(request, SIPResponseStatusCodesEnum.NotAcceptableHere, "Audio pipeline unavailable"));
+            }
         }
 
-        public bool UnregisterSIPDevice(SIPTransport sipTransport, SIPRequest sipRequest)
+        private void UnregisterSIPDevice(SIPRequest request)
         {
-            return true;
+            this._deviceManager.GetSIPDeviceById(request)?.CloseCallSession();
         }
     }
 }

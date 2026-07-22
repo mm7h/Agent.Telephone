@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Agent.Telephone.Protocol.Client
+namespace Agent.Telephone.Handlers.AIAdapterHandlers
 {
-    internal static class ClientBuilderExtensions
+    internal interface IAIAdapterHandler
     {
     }
 }

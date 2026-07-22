@@ -1,18 +1,9 @@
 ﻿using Agent.Telephone.Abstractions.Configs;
-using Agent.Telephone.Management;
 using Agent.Telephone.Protocol.Server.Middlewares;
-using DnsClient.Internal;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using SIPSorcery.Net;
 using SIPSorcery.SIP;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net;
 using System.Net.Sockets;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Agent.Telephone.Protocol.Server
 {
