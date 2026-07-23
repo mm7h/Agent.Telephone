@@ -46,7 +46,7 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD.Models
         {
             if (newState.Length != this.HiddenState.Length)
             {
-                throw new ArgumentException(string.Format("Òş²Ø×´Ì¬´óĞ¡²»Æ¥Åä¡£Ô¤ÆÚ {0}£¬Êµ¼Ê {1}", this.HiddenState.Length, newState.Length));
+                throw new ArgumentException(string.Format("éšè—çŠ¶æ€å¤§å°ä¸åŒ¹é…ã€‚é¢„æœŸ {0}ï¼Œå®é™… {1}", this.HiddenState.Length, newState.Length));
             }
             Array.Copy(newState, this.HiddenState, newState.Length);
         }
@@ -58,7 +58,7 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD.Models
         {
             if (newState.Length != this.CellState.Length)
             {
-                throw new ArgumentException(string.Format("µ¥Ôª×´Ì¬´óĞ¡²»Æ¥Åä¡£Ô¤ÆÚ {0}£¬Êµ¼Ê {1}", this.CellState.Length, newState.Length));
+                throw new ArgumentException(string.Format("å•å…ƒçŠ¶æ€å¤§å°ä¸åŒ¹é…ã€‚é¢„æœŸ {0}ï¼Œå®é™… {1}", this.CellState.Length, newState.Length));
             }
             Array.Copy(newState, this.CellState, newState.Length);
         }

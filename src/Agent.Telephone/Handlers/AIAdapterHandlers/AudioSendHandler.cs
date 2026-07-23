@@ -30,13 +30,13 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         {
             if (this.DeviceContext.ActiveCall is null)
             {
-                this.Logger.LogWarning("Éè±¸ {deviceId} Ã»ÓĞ»î¶¯ºô½Ğ£¬ÎŞ·¨¹¹½¨´¦ÀíÆ÷¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogWarning("è®¾å¤‡ {deviceId} æ²¡æœ‰æ´»åŠ¨å‘¼å«ï¼Œæ— æ³•æ„å»ºå¤„ç†å™¨ã€‚", this.DeviceContext.DeviceId);
                 return false;
             }
             PrivateProvider privateProvider = this.DeviceContext.ActiveCall.AIAgentContext.PrivateProvider;
             if (privateProvider.AudioProcessor is null)
             {
-                this.Logger.LogError("ÒôÆµ´¦ÀíÆ÷Î´ÎªÉè±¸ÅäÖÃ: {deviceId}¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogError("éŸ³é¢‘å¤„ç†å™¨æœªä¸ºè®¾å¤‡é…ç½®: {deviceId}ã€‚", this.DeviceContext.DeviceId);
                 return false;
             }
 
@@ -68,13 +68,13 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
             if (this._audioProcessor is null)
             { 
-                this.Logger.LogError("ÒôÆµ´¦ÀíÆ÷Î´ÎªÉè±¸ÅäÖÃ: {deviceId}¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogError("éŸ³é¢‘å¤„ç†å™¨æœªä¸ºè®¾å¤‡é…ç½®: {deviceId}ã€‚", this.DeviceContext.DeviceId);
                 return;
             }
 
             if (this.DeviceContext.ActiveCall is null)
             {
-                this.Logger.LogWarning("Éè±¸ {deviceId} Ã»ÓĞ»î¶¯ºô½Ğ£¬ÎŞ·¨·¢ËÍÒôÆµ¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogWarning("è®¾å¤‡ {deviceId} æ²¡æœ‰æ´»åŠ¨å‘¼å«ï¼Œæ— æ³•å‘é€éŸ³é¢‘ã€‚", this.DeviceContext.DeviceId);
                 return;
             }
 
@@ -90,7 +90,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 || AudioProcessSettings.ModelToInputSampleRate * packetTimeMs % 1000 != 0
                 || audioFormat.ClockRate * packetTimeMs % 1000 != 0)
             {
-                this.Logger.LogWarning("Éè±¸ {deviceId} µÄ RTP ÒôÆµ°ü²ÎÊıÎŞĞ§¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogWarning("è®¾å¤‡ {deviceId} çš„ RTP éŸ³é¢‘åŒ…å‚æ•°æ— æ•ˆã€‚", this.DeviceContext.DeviceId);
                 return;
             }
 
@@ -111,11 +111,11 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             catch (OperationCanceledException)
             {
-                this.Logger.LogDebug("ÒôÆµ·¢ËÍÒÑÈ¡Ïû£¬Éè±¸ {deviceId}¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogDebug("éŸ³é¢‘å‘é€å·²å–æ¶ˆï¼Œè®¾å¤‡ {deviceId}ã€‚", this.DeviceContext.DeviceId);
             }
             catch (Exception exception)
             {
-                this.Logger.LogError(exception, "´¦ÀíÀ´×ÔÉè±¸µÄÒôÆµ·¢ËÍÊı¾İ°üÊ§°Ü: {deviceId}¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogError(exception, "å¤„ç†æ¥è‡ªè®¾å¤‡çš„éŸ³é¢‘å‘é€æ•°æ®åŒ…å¤±è´¥: {deviceId}ã€‚", this.DeviceContext.DeviceId);
             }
         }
 

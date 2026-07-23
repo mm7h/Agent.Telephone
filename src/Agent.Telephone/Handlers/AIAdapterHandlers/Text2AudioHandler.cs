@@ -17,8 +17,8 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         private readonly ObjectPool<OutSegment> _segmentPool;
         private readonly ObjectPool<Workflow<float[]>> _audioWorkflowPool;
 
-        public Text2AudioHandler(ObjectPool<Workflow<OutSegment>> segmentWorkflowPool, 
-            ObjectPool<OutSegment> segmentPool, 
+        public Text2AudioHandler(ObjectPool<Workflow<OutSegment>> segmentWorkflowPool,
+            ObjectPool<OutSegment> segmentPool,
             ObjectPool<Workflow<float[]>> audioWorkflowPool,
             TelephoneConfig config,
             ILogger<Text2AudioHandler> logger) : base(config, logger)
@@ -36,13 +36,13 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         {
             if (this.DeviceContext.ActiveCall is null)
             {
-                this.Logger.LogWarning("Éè±¸ {deviceId} Ã»ÓĞ»î¶¯ºô½Ğ£¬ÎŞ·¨¹¹½¨´¦ÀíÆ÷¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogWarning("è®¾å¤‡ {deviceId} æ²¡æœ‰æ´»åŠ¨å‘¼å«ï¼Œæ— æ³•æ„å»ºå¤„ç†å™¨ã€‚", this.DeviceContext.DeviceId);
                 return false;
             }
             PrivateProvider privateProvider = this.DeviceContext.ActiveCall.AIAgentContext.PrivateProvider;
             if (privateProvider.Tts is null)
             {
-                this.Logger.LogError("Éè±¸ {deviceId} Î´ÅäÖÃ TTS Ìá¹©³ÌĞò¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogError("è®¾å¤‡ {deviceId} æœªé…ç½® TTS æä¾›ç¨‹åºã€‚", this.DeviceContext.DeviceId);
                 return false;
             }
 
@@ -59,7 +59,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             {
                 try
                 {
-                    await this.Handle(workflow);
+                    await this.HandleAsync(workflow);
                 }
                 finally
                 {
@@ -68,7 +68,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 }
             }
         }
-        public async Task Handle(Workflow<OutSegment> workflow)
+        public async Task HandleAsync(Workflow<OutSegment> workflow)
         {
             if (!this.CheckWorkflowValid(workflow))
             {
@@ -76,14 +76,14 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             if (this._tts is null)
             {
-                this.Logger.LogError("TTSÌá¹©³ÌĞòÎ´ÎªÉè±¸ÅäÖÃ: {deviceId}¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogError("TTSæä¾›ç¨‹åºæœªä¸ºè®¾å¤‡é…ç½®: {deviceId}ã€‚", this.DeviceContext.DeviceId);
                 return;
             }
             try
             {
                 if (string.IsNullOrWhiteSpace(workflow.Data.Content))
                 {
-                    this.Logger.LogInformation("ÎŞĞèTTS£¬²éÑ¯ÎÄ±¾Îª¿Õ¡£");
+                    this.Logger.LogInformation("æ— éœ€TTSï¼ŒæŸ¥è¯¢æ–‡æœ¬ä¸ºç©ºã€‚");
                     return;
                 }
                 this.HandlerToken.ThrowIfCancellationRequested();
@@ -91,16 +91,16 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             catch (OperationCanceledException)
             {
-                this.Logger.LogDebug("TTS ºÏ³ÉÒÑÈ¡Ïû£¬Éè±¸ {DeviceId}¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogDebug("TTS åˆæˆå·²å–æ¶ˆï¼Œè®¾å¤‡ {DeviceId}ã€‚", this.DeviceContext.DeviceId);
             }
             catch (Exception exception)
             {
-                this.Logger.LogError(exception, "´¦ÀíÉè±¸ÎÄ±¾×ªÓïÒôÊ±³ö´í: {deviceId}¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogError(exception, "å¤„ç†è®¾å¤‡æ–‡æœ¬è½¬è¯­éŸ³æ—¶å‡ºé”™: {deviceId}ã€‚", this.DeviceContext.DeviceId);
             }
         }
-        public void OnBeforeProcessing(string sentence, bool isFirstSegment, bool isLastSegment) 
+        public void OnBeforeProcessing(string sentence, bool isFirstSegment, bool isLastSegment)
         {
-        
+
         }
         public void OnProcessing(float[] audioData, bool isFirstFrame, bool isLastFrame)
         {
@@ -125,10 +125,10 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         }
 
 
-        
-        public void OnProcessed(string sentence, bool isFirstSegment, bool isLastSegment, TtsGenerateResult ttsGenerateResult) 
-        { 
-        
+
+        public void OnProcessed(string sentence, bool isFirstSegment, bool isLastSegment, TtsGenerateResult ttsGenerateResult)
+        {
+
         }
         public void OnSentenceStart(string sentence, string sentenceId)
         {

@@ -52,12 +52,12 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
                 };
                 string modelPath = Path.Combine(this.ModelFileFoler, "model.onnx");
                 this._session = new InferenceSession(modelPath, sessionOptions);
-                this.Logger.LogInformation("Silero VAD v4 ONNX Ä£ĞÍÒÑ¼ÓÔØ£º{modelName}", this.ModelName);
+                this.Logger.LogInformation("Silero VAD v4 ONNX æ¨¡å‹å·²åŠ è½½ï¼š{modelName}", this.ModelName);
                 return true;
             }
             else
             {
-                this.Logger.LogError("ÎŞĞ§µÄÄ£ĞÍ£º{modelName}", this.ModelName);
+                this.Logger.LogError("æ— æ•ˆçš„æ¨¡å‹ï¼š{modelName}", this.ModelName);
                 return false;
             }
         }
@@ -84,12 +84,12 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
         {
             if (this._disposed)
             {
-                throw new ObjectDisposedException(nameof(SileroOnnx), string.Format("¶ÔÏó {0} ÒÑ±»ÊÍ·Å¡£", nameof(SileroOnnx)));
+                throw new ObjectDisposedException(nameof(SileroOnnx), string.Format("å¯¹è±¡ {0} å·²è¢«é‡Šæ”¾ã€‚", nameof(SileroOnnx)));
             }
 
             if (this._session is null)
             {
-                throw new InvalidOperationException("Ä£ĞÍ»á»°Î´³õÊ¼»¯¡£");
+                throw new InvalidOperationException("æ¨¡å‹ä¼šè¯æœªåˆå§‹åŒ–ã€‚");
             }
 
             this.ValidateInput(audioSamples, sampleRate, modelState);
@@ -97,7 +97,7 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
             int expectedSamples = sampleRate == 16000 ? 512 : 256;
             if (audioSamples.Length != expectedSamples)
             {
-                throw new ArgumentException(string.Format("Ñù±¾ÊıÁ¿²»Æ¥Åä¡£ÆÚÍû {0} ¸öÑù±¾£¬Êµ¼Ê {1} ¸öÑù±¾£¬²ÉÑùÂÊ {2}¡£", expectedSamples, audioSamples.Length, sampleRate));
+                throw new ArgumentException(string.Format("æ ·æœ¬æ•°é‡ä¸åŒ¹é…ã€‚æœŸæœ› {0} ä¸ªæ ·æœ¬ï¼Œå®é™… {1} ä¸ªæ ·æœ¬ï¼Œé‡‡æ ·ç‡ {2}ã€‚", expectedSamples, audioSamples.Length, sampleRate));
             }
 
             int stateSize = sampleRate == 16000 ? 64 : 128;
@@ -168,17 +168,17 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
         {
             if (audioSamples == null || audioSamples.Length == 0)
             {
-                throw new ArgumentException("ÒôÆµÑù±¾Îª¿Õ¡£");
+                throw new ArgumentException("éŸ³é¢‘æ ·æœ¬ä¸ºç©ºã€‚");
             }
 
             if (!SUPPORTED_SAMPLE_RATES.Contains(sampleRate))
             {
-                throw new ArgumentException(string.Format("²»Ö§³ÖµÄ²ÉÑùÂÊ£º{sampleRate}¡£½öÖ§³Ö 8000 ºÍ 16000¡£", sampleRate));
+                throw new ArgumentException(string.Format("ä¸æ”¯æŒçš„é‡‡æ ·ç‡ï¼š{sampleRate}ã€‚ä»…æ”¯æŒ 8000 å’Œ 16000ã€‚", sampleRate));
             }
 
             if (modelState.LastSampleRate != sampleRate)
             {
-                this.Logger.LogDebug("²ÉÑùÂÊ´Ó {lastSr} ¸ü¸ÄÎª {newSr}£¬ÖØÖÃÄ£ĞÍ×´Ì¬¡£", modelState.LastSampleRate, sampleRate);
+                this.Logger.LogDebug("é‡‡æ ·ç‡ä» {lastSr} æ›´æ”¹ä¸º {newSr}ï¼Œé‡ç½®æ¨¡å‹çŠ¶æ€ã€‚", modelState.LastSampleRate, sampleRate);
                 modelState.Reset();
                 modelState.LastSampleRate = sampleRate;
             }
@@ -190,7 +190,7 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
             {
                 this._session?.Dispose();
                 this._disposed = true;
-                this.Logger.LogInformation("Silero VAD v4 ONNX Ä£ĞÍÒÑÊÍ·Å¡£");
+                this.Logger.LogInformation("Silero VAD v4 ONNX æ¨¡å‹å·²é‡Šæ”¾ã€‚");
             }
             GC.SuppressFinalize(this);
         }

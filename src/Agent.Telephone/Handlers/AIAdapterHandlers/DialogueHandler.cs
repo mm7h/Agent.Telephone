@@ -36,13 +36,13 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         {
             if (this.DeviceContext.ActiveCall is null)
             {
-                this.Logger.LogWarning("Éè±¸ {deviceId} Ã»ÓĞ»î¶¯ºô½Ğ£¬ÎŞ·¨¹¹½¨´¦ÀíÆ÷¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogWarning("è®¾å¤‡ {deviceId} æ²¡æœ‰æ´»åŠ¨å‘¼å«ï¼Œæ— æ³•æ„å»ºå¤„ç†å™¨ã€‚", this.DeviceContext.DeviceId);
                 return false;
             }
             PrivateProvider privateProvider = this.DeviceContext.ActiveCall.AIAgentContext.PrivateProvider;
             if (privateProvider.Llm is null)
             {
-                this.Logger.LogError("Éè±¸ {deviceId} Î´ÅäÖÃ LLM Ìá¹©³ÌĞò¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogError("è®¾å¤‡ {deviceId} æœªé…ç½® LLM æä¾›ç¨‹åºã€‚", this.DeviceContext.DeviceId);
                 return false;
             }
             this._llm = privateProvider.Llm;
@@ -79,7 +79,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
             if (this._llm is null)
             {
-                this.Logger.LogError("LLMÌá¹©³ÌĞòÎ´ÎªÉè±¸ÅäÖÃ: {deviceId}¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogError("LLMæä¾›ç¨‹åºæœªä¸ºè®¾å¤‡é…ç½®: {deviceId}ã€‚", this.DeviceContext.DeviceId);
                 return;
             }
 
@@ -89,16 +89,16 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             catch (OperationCanceledException)
             {
-                this.Logger.LogDebug("LLM ¶Ô»°ÒÑÈ¡Ïû£¬Éè±¸ {DeviceId}", this.DeviceContext.DeviceId);
+                this.Logger.LogDebug("LLM å¯¹è¯å·²å–æ¶ˆï¼Œè®¾å¤‡ {DeviceId}", this.DeviceContext.DeviceId);
             }
             catch (Exception exception)
             {
-                this.Logger.LogError(exception, "´¦ÀíÀ´×ÔÉè±¸µÄLLM¶Ô»°Ê§°Ü: {deviceId}¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogError(exception, "å¤„ç†æ¥è‡ªè®¾å¤‡çš„LLMå¯¹è¯å¤±è´¥: {deviceId}ã€‚", this.DeviceContext.DeviceId);
             }
         }
         private void OnBeforeTokenGenerate()
         {
-            // todo£º¿ÉÒÔ×öÒ»Ğ©¼ì²é×´Ì¬£¬×öÌáÇ°×¼±¸
+            // todoï¼šå¯ä»¥åšä¸€äº›æ£€æŸ¥çŠ¶æ€ï¼Œåšæå‰å‡†å¤‡
         }
         private void OnTokenGenerating(OutSegment segment)
         {
@@ -117,7 +117,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             Workflow<OutSegment> workflow = this._segmentWorkflowPool.Get();
             workflow.Initialize(this.DeviceContext, clonedSegment);
 
-            // todo£º¼ì²é×´Ì¬£¬Èç¹û¿Í»§¶ËÊÇ¹Ò»ú×´Ì¬£¬ÕâÊ±ºò¾Í¿ÉÒÔ¿ªÊ¼ºô½Ğ¿Í»§¶ËÁË
+            // todoï¼šæ£€æŸ¥çŠ¶æ€ï¼Œå¦‚æœå®¢æˆ·ç«¯æ˜¯æŒ‚æœºçŠ¶æ€ï¼Œè¿™æ—¶å€™å°±å¯ä»¥å¼€å§‹å‘¼å«å®¢æˆ·ç«¯äº†
 
             try
             {
@@ -143,7 +143,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 this._segmentPool.Return(segment);
             }
 
-            // todo£º¿ªÊ¼¼ÆÊ±£¬Èç¹û³¬¹ı30sÃ»ÓĞ½ÓÌı£¬ÄÇÃ´¾ÍÈ¡Ïûºô½Ğ
+            // todoï¼šå¼€å§‹è®¡æ—¶ï¼Œå¦‚æœè¶…è¿‡30sæ²¡æœ‰æ¥å¬ï¼Œé‚£ä¹ˆå°±å–æ¶ˆå‘¼å«
             // this.Config.SIPConfig.HangUpTimeoutSeconds
         }
 

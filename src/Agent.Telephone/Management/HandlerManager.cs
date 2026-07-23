@@ -68,7 +68,7 @@ namespace Agent.Telephone.Management
 
             if (!buildResults)
             {
-                this.Logger.LogError("ÎÞ·¨ÎªÉè±¸ {deviceId} ¹¹½¨´¦Àí³ÌÐò¹ÜµÀ¡£", deviceContext.DeviceId);
+                this.Logger.LogError("æ— æ³•ä¸ºè®¾å¤‡ {deviceId} æž„å»ºå¤„ç†ç¨‹åºç®¡é“ã€‚", deviceContext.DeviceId);
                 return false;
             }
 
@@ -100,7 +100,7 @@ namespace Agent.Telephone.Management
             next.PreviousReader = channel.Reader;
 
             Task.Run(next.HandleAsync);
-            this.Logger?.LogDebug("ÒÑ¹¹½¨´¦Àí³ÌÐò¹¤×÷Á÷£¬ÉÏÒ»²½£º{previous} -> ÏÂÒ»²½£º{next}", previous.GetType().Name, next.GetType().Name);
+            this.Logger?.LogDebug("å·²æž„å»ºå¤„ç†ç¨‹åºå·¥ä½œæµï¼Œä¸Šä¸€æ­¥ï¼š{previous} -> ä¸‹ä¸€æ­¥ï¼š{next}", previous.GetType().Name, next.GetType().Name);
         }
     }
 }

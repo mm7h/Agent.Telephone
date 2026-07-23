@@ -74,7 +74,7 @@ namespace Agent.Telephone.Common.Contexts
             SDP? sdp = SDP.ParseSDPDescription(request.Body);
             SDPMediaAnnouncement? audio = sdp?.Media.FirstOrDefault(x => x.Media == SDPMediaTypesEnum.audio);
 
-            // ptime/maxptime Õý³£Ó¦ÔÚÒôÆµÃ½Ìå¶Î£»»á»°¼¶»ØÍË½ö×÷¼æÈÝ¡£
+            // ptime/maxptime æ­£å¸¸åº”åœ¨éŸ³é¢‘åª’ä½“æ®µï¼›ä¼šè¯çº§å›žé€€ä»…ä½œå…¼å®¹ã€‚
             int? ptime = GetIntegerAttribute(audio?.ExtraMediaAttributes, "ptime")
                 ?? GetIntegerAttribute(sdp?.ExtraSessionAttributes, "ptime");
 
@@ -83,7 +83,7 @@ namespace Agent.Telephone.Common.Contexts
 
             int packetTimeMs = ptime ?? AudioProcessSettings.DefaultPacketTimeMs;
 
-            // maxptime ½ö±íÊ¾ÉÏÏÞ£¬²»ÊÇ½¨Òé²ÉÓÃµÄ°üÊ±³¤¡£
+            // maxptime ä»…è¡¨ç¤ºä¸Šé™ï¼Œä¸æ˜¯å»ºè®®é‡‡ç”¨çš„åŒ…æ—¶é•¿ã€‚
             if (maxPtime is int max && packetTimeMs > max)
             {
                 packetTimeMs = max;

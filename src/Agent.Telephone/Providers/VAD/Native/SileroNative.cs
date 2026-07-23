@@ -51,7 +51,7 @@ namespace Agent.Telephone.Providers.VAD.Native
 
                 if (this._sampleRate != SAMPLING_RATE_8K && this._sampleRate != SAMPLING_RATE_16K)
                 {
-                    this.Logger.LogError("²»Ö§³ÖµÄ²ÉÑùÂÊ£º{sampleRate}¡£½öÖ§³Ö 8000 ºÍ 16000¡£", this._sampleRate);
+                    this.Logger.LogError("ä¸æ”¯æŒçš„é‡‡æ ·ç‡ï¼š{sampleRate}ã€‚ä»…æ”¯æŒ 8000 å’Œ 16000ã€‚", this._sampleRate);
                     return false;
                 }
 
@@ -66,13 +66,13 @@ namespace Agent.Telephone.Providers.VAD.Native
 
                 this._sileroModelState = SileroOnnx.CreateModelState(this._sampleRate);
 
-                this.Logger.LogInformation("ÒÑ¹¹½¨ {providerType} Ä£ĞÍ£º{modelName}", this.ProviderType, this.ModelName);
+                this.Logger.LogInformation("å·²æ„å»º {providerType} æ¨¡å‹ï¼š{modelName}", this.ProviderType, this.ModelName);
 
                 return true;
             }
             catch (Exception ex)
             {
-                this.Logger.LogError(ex, "{providerType} ÅäÖÃÎŞĞ§£º{modelName}", this.ProviderType, this.ModelName);
+                this.Logger.LogError(ex, "{providerType} é…ç½®æ— æ•ˆï¼š{modelName}", this.ProviderType, this.ModelName);
                 return false;
             }
         }
@@ -94,12 +94,12 @@ namespace Agent.Telephone.Providers.VAD.Native
         {
             if (this._vadOnnxModel is null)
             {
-                throw new ArgumentNullException("ÇëÏÈ¹¹½¨ VAD Ìá¹©³ÌĞò¡£");
+                throw new ArgumentNullException("è¯·å…ˆæ„å»º VAD æä¾›ç¨‹åºã€‚");
             }
 
             if (this._sileroModelState is null || this._vadSessionState is null)
             {
-                throw new ArgumentNullException("ÇëÏÈ¹¹½¨ VAD Ìá¹©³ÌĞò¡£");
+                throw new ArgumentNullException("è¯·å…ˆæ„å»º VAD æä¾›ç¨‹åºã€‚");
             }
 
             try
@@ -142,7 +142,7 @@ namespace Agent.Telephone.Providers.VAD.Native
                         long stopDuration = DateTimeOffset.Now.ToUnixTimeMilliseconds() - this._vadSessionState.HaveVoiceLatestTime;
                         if (stopDuration >= this._silenceThresholdSecond * 1000)
                         {
-                            this.Logger.LogDebug("Éè±¸ {deviceId} µÄÓïÒôÒÑÍ£Ö¹£¬¾²Ä¬³ÖĞøÊ±¼ä£º{stopDuration}ms", deviceId, stopDuration);
+                            this.Logger.LogDebug("è®¾å¤‡ {deviceId} çš„è¯­éŸ³å·²åœæ­¢ï¼Œé™é»˜æŒç»­æ—¶é—´ï¼š{stopDuration}ms", deviceId, stopDuration);
                             this._vadSessionState.VoiceStop = true;
 
                             this._vadEventCallback?.OnVoiceDetected(audioData);
@@ -171,12 +171,12 @@ namespace Agent.Telephone.Providers.VAD.Native
             {
                 this._sileroModelState.Reset();
                 this._vadSessionState.Reset();
-                this.Logger.LogWarning("ÓÃ»§È¡ÏûÁË {providerType} ÈÎÎñ¡£", this.ProviderType);
+                this.Logger.LogWarning("ç”¨æˆ·å–æ¶ˆäº† {providerType} ä»»åŠ¡ã€‚", this.ProviderType);
                 throw;
             }
             catch (Exception ex)
             {
-                this.Logger.LogError(ex, "Éè±¸ {deviceId} µÄ {providerType} ·¢ÉúÒâÍâ´íÎó", this.ProviderType, deviceId);
+                this.Logger.LogError(ex, "è®¾å¤‡ {deviceId} çš„ {providerType} å‘ç”Ÿæ„å¤–é”™è¯¯", this.ProviderType, deviceId);
                 return Task.CompletedTask;
             }
             finally
@@ -198,7 +198,7 @@ namespace Agent.Telephone.Providers.VAD.Native
 
             if (silenceDuration >= longTermSilenceThresholdMs)
             {
-                this.Logger.LogDebug("¼ì²âµ½Éè±¸ {deviceId} µÄ³¤ÆÚ¾²Ä¬£¬³ÖĞøÊ±¼ä£º{silenceDuration}ms", deviceId, silenceDuration);
+                this.Logger.LogDebug("æ£€æµ‹åˆ°è®¾å¤‡ {deviceId} çš„é•¿æœŸé™é»˜ï¼ŒæŒç»­æ—¶é—´ï¼š{silenceDuration}ms", deviceId, silenceDuration);
                 this._vadEventCallback?.OnLongTermSilence();
             }
         }

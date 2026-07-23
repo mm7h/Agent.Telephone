@@ -31,13 +31,13 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         {
             if (this.DeviceContext.ActiveCall is null)
             {
-                this.Logger.LogWarning("Éè±¸ {deviceId} Ã»ÓĞ»î¶¯ºô½Ğ£¬ÎŞ·¨¹¹½¨´¦ÀíÆ÷¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogWarning("è®¾å¤‡ {deviceId} æ²¡æœ‰æ´»åŠ¨å‘¼å«ï¼Œæ— æ³•æ„å»ºå¤„ç†å™¨ã€‚", this.DeviceContext.DeviceId);
                 return false;
             }
             PrivateProvider privateProvider = this.DeviceContext.ActiveCall.AIAgentContext.PrivateProvider;
             if (privateProvider.Asr is null)
             {
-                this.Logger.LogError("Éè±¸ {deviceId} Î´ÅäÖÃ ASR Ìá¹©³ÌĞò¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogError("è®¾å¤‡ {deviceId} æœªé…ç½® ASR æä¾›ç¨‹åºã€‚", this.DeviceContext.DeviceId);
                 return false;
             }
             this._asr = privateProvider.Asr;
@@ -70,7 +70,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             if (this._asr is null)
             {
-                this.Logger.LogError("ASRÌá¹©³ÌĞòÎ´ÎªÉè±¸ÅäÖÃ: {deviceId}¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogError("ASRæä¾›ç¨‹åºæœªä¸ºè®¾å¤‡é…ç½®: {deviceId}ã€‚", this.DeviceContext.DeviceId);
                 return;
             }
 
@@ -80,11 +80,11 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             catch (OperationCanceledException)
             {
-                this.Logger.LogDebug("ASR ´¦ÀíÒÑÈ¡Ïû£¬Éè±¸ {DeviceId}", this.DeviceContext.DeviceId);
+                this.Logger.LogDebug("ASR å¤„ç†å·²å–æ¶ˆï¼Œè®¾å¤‡ {DeviceId}", this.DeviceContext.DeviceId);
             }
             catch (Exception ex)
             {
-                this.Logger.LogError(ex, "´¦ÀíÀ´×ÔÉè±¸ {deviceId} µÄÓïÒô×ªÎÄ±¾Êı¾İ°üÊ§°Ü¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogError(ex, "å¤„ç†æ¥è‡ªè®¾å¤‡ {deviceId} çš„è¯­éŸ³è½¬æ–‡æœ¬æ•°æ®åŒ…å¤±è´¥ã€‚", this.DeviceContext.DeviceId);
             }
         }
 
@@ -92,22 +92,22 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         {
             if (!success)
             {
-                this.Logger.LogError("ASR ×ª»»ÓïÒôÎÄ±¾Ê§°Ü¡£");
+                this.Logger.LogError("ASR è½¬æ¢è¯­éŸ³æ–‡æœ¬å¤±è´¥ã€‚");
                 return;
             }
             if (string.IsNullOrWhiteSpace(text))
             {
                 // todo
                 //this.DeviceContext.Reset();
-                this.Logger.LogDebug("Éè±¸ {deviceId} Î´¼ì²âµ½ÓïÒô¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogDebug("è®¾å¤‡ {deviceId} æœªæ£€æµ‹åˆ°è¯­éŸ³ã€‚", this.DeviceContext.DeviceId);
                 return;
             }
             if (this.DeviceContext.ActiveCall is null)
             {
-                this.Logger.LogWarning("Éè±¸ {deviceId} Ã»ÓĞ»î¶¯ºô½Ğ£¬ÎŞ·¨×ª»»ÓïÒôµ½ÎÄ±¾¡£", this.DeviceContext.DeviceId);
+                this.Logger.LogWarning("è®¾å¤‡ {deviceId} æ²¡æœ‰æ´»åŠ¨å‘¼å«ï¼Œæ— æ³•è½¬æ¢è¯­éŸ³åˆ°æ–‡æœ¬ã€‚", this.DeviceContext.DeviceId);
                 return;
             }
-            this.Logger.LogDebug("Éè±¸ {deviceId} ¼ì²âµ½ÓïÒôÎÄ±¾: {text}", this.DeviceContext.DeviceId, text);
+            this.Logger.LogDebug("è®¾å¤‡ {deviceId} æ£€æµ‹åˆ°è¯­éŸ³æ–‡æœ¬: {text}", this.DeviceContext.DeviceId, text);
             Workflow<string> workflow = this._textWorkflowPool.Get();
             workflow.Initialize(this.DeviceContext, text);
             try
