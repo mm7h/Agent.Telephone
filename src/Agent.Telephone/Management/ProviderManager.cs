@@ -1,3 +1,4 @@
+using System.ClientModel;
 using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Configs;
 using Agent.Telephone.Common.Constants;
@@ -21,8 +22,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using SIPSorcery.SIP;
-using System;
-using System.ClientModel;
 
 namespace Agent.Telephone.Management
 {
@@ -95,18 +94,91 @@ namespace Agent.Telephone.Management
             PrivateProvider providers = deviceContext.ActiveCall.AIAgentContext.PrivateProvider;
             try
             {
+                #region AudioProcessor Build
                 var audioProcessor = this.ServiceProvider.GetRequiredService<IAudioProcessor>();
-                var vad = this.ServiceProvider.GetRequiredService<IVad>();
-                var asr = this.ServiceProvider.GetRequiredService<IAsr>();
-                var llm = this.ServiceProvider.GetRequiredService<ILlm>();
-                var tts = this.ServiceProvider.GetRequiredService<ITts>();
+                if (!audioProcessor.Build(ModelSetting.Empty))
+                {
+                    this.Logger.LogWarning("无法构建 {modelName} 提供程序。", audioProcessor.ModelName); return Task.FromResult(false);
+                }
+                providers.SetAudioProcessor(audioProcessor); 
+                #endregion
 
-
-                providers.SetAudioProcessor(audioProcessor);
+                #region VAD Build
+                var vad = this.ServiceProvider.GetRequiredKeyedService<IVad>(ConvertToKebabCase(deviceContext.ActiveCall.AssistantConfig.VAD));
+                if (!vad.IsSherpaModel && !vad.Build(this.GetSelectedSetting("VAD", this.Config.ModelConfig)))
+                {
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", vad.ModelName);
+                    return Task.FromResult(false);
+                }
                 providers.SetVad(vad);
+                #endregion
+
+                #region ASR Build
+                var asr = this.ServiceProvider.GetRequiredKeyedService<IAsr>(ConvertToKebabCase(deviceContext.ActiveCall.AssistantConfig.ASR));
+                if (!asr.IsSherpaModel && !asr.Build(this.GetSelectedSetting("ASR", this.Config.ModelConfig)))
+                {
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", asr.ModelName);
+                    return Task.FromResult(false);
+                }
                 providers.SetAsr(asr);
+                #endregion
+
+                #region LLM Build
+                var llm = this.ServiceProvider.GetRequiredKeyedService<ILlm>(ConvertToKebabCase(deviceContext.ActiveCall.AssistantConfig.LLM));
+
+                ModelSetting selectedIntentLLMModelSetting = this.GetSelectedSetting("Intent", this.Config.ModelConfig);
+                string intentType = selectedIntentLLMModelSetting.Config.GetConfigValueOrDefault("Type", "None");
+
+                ModelSetting selectedChatLLMModelSetting = this.GetSelectedSetting("LLM", this.Config.ModelConfig);
+                selectedChatLLMModelSetting.Config.SetConfigValue("IntentType", intentType);
+
+                ModelSetting intentResponseAgentSetting = new ModelSetting
+                {
+                    ModelName = selectedIntentLLMModelSetting.ModelName,
+                    Config = new Dictionary<string, string>(selectedIntentLLMModelSetting.Config)
+                };
+
+                ModelSetting inputAgentSetting = new ModelSetting
+                {
+                    ModelName = SubAgentNames.InputAgent,
+                    Config = new Dictionary<string, string>
+                    {
+                       { "IntentType", intentType }
+                    }
+                };
+
+                Dictionary<string, ModelSetting> agentSettings = new Dictionary<string, ModelSetting>
+                {
+                    { SubAgentNames.InputAgent, inputAgentSetting },
+                    { SubAgentNames.IntentDetectionAgent, selectedIntentLLMModelSetting },
+                    { SubAgentNames.FunctionCallAgent, ModelSetting.Empty },
+                    { SubAgentNames.IntentResponseAgent, intentResponseAgentSetting },
+                    { SubAgentNames.ChatAgent, selectedChatLLMModelSetting },
+                    { SubAgentNames.OutputAgent, ModelSetting.Empty },
+                };
+
+                LLMBuildConfig llmBuildConfig = new LLMBuildConfig(
+                    agentSettings,
+                    deviceContext.ActiveCall.AIAgentContext.PrivateProvider);
+
+                if (!llm.Build(llmBuildConfig))
+                {
+                    this.Logger.LogError("无法为设备 {deviceId} 构建通用 LLM 模型。", deviceContext.DeviceId);
+                    return Task.FromResult(false);
+                }
                 providers.SetLlm(llm);
-                providers.SetTts(tts);
+                #endregion
+
+                #region TTS Build
+                var tts = this.ServiceProvider.GetRequiredKeyedService<ITts>(ConvertToKebabCase(deviceContext.ActiveCall.AssistantConfig.TTS));
+                if (!tts.IsSherpaModel && !tts.Build(this.GetSelectedSetting("TTS", this.Config.ModelConfig)))
+                {
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", tts.ModelName);
+                    return Task.FromResult(false);
+                }
+                providers.SetTts(tts); 
+                #endregion
+
                 return Task.FromResult(true);
             }
             catch (Exception exception)
@@ -135,21 +207,6 @@ namespace Agent.Telephone.Management
         private static void RegisterAudioProcessor(IServiceCollection services)
         {
             services.AddTransient<IAudioProcessor, DefaultAudioProcessor>();
-        }
-
-        public void BuildAudioProcessor(DeviceContext deviceContext)
-        {
-            if (deviceContext.ActiveCall is null)
-            {
-                this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法构建处理器。", deviceContext.DeviceId);
-                return;
-            }
-            IAudioProcessor audioProcessor = this.ServiceProvider.GetRequiredService<IAudioProcessor>();
-            if (!audioProcessor.Build(ModelSetting.Empty))
-            {
-                this.Logger.LogWarning("无法构建 {modelName} 提供程序。", audioProcessor.ModelName);
-            }
-            deviceContext.ActiveCall.AIAgentContext.PrivateProvider.SetAudioProcessor(audioProcessor);
         }
         #endregion
 
@@ -264,125 +321,5 @@ namespace Agent.Telephone.Management
         #endregion
 
         #endregion
-
-
-        private bool RegisterGlobalProviders(DeviceContext deviceContext)
-        {
-            bool vadRegistered = this.RegisterGlobalVadProviders(deviceContext);
-            bool asrRegistered = this.RegisterGlobalAsrProviders(deviceContext);
-            bool llmRegistered = this.RegisterGlobalLlmProviders(deviceContext);
-            bool ttsRegistered = this.RegisterGlobalTtsProviders(deviceContext);
-
-            return vadRegistered && asrRegistered && llmRegistered && ttsRegistered;
-        }
-
-        private bool RegisterGlobalVadProviders(DeviceContext deviceContext)
-        {
-            if (deviceContext.ActiveCall is null)
-            {
-                this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法构建处理器。", deviceContext.DeviceId);
-                return false;
-            }
-            IVad genericVad = this.ServiceProvider.GetRequiredKeyedService<IVad>(GlobalProviderNames.GLOBAL_VAD);
-            if (!genericVad.IsSherpaModel && !genericVad.Build(this.GetSelectedSetting("VAD", this.Config.ModelConfig)))
-            {
-                this.Logger.LogError("无法构建 {modelName} 提供程序。", genericVad.ModelName);
-                return false;
-            }
-            deviceContext.ActiveCall.AIAgentContext.PrivateProvider.SetVad(genericVad);
-            this.Logger.LogInformation("设备 {deviceId} 的通用 VAD {modeName} 模型已初始化。", deviceContext.DeviceId, genericVad.ModelName);
-            return true;
-        }
-
-        private bool RegisterGlobalAsrProviders(DeviceContext deviceContext)
-        {
-            if (deviceContext.ActiveCall is null)
-            {
-                this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法构建处理器。", deviceContext.DeviceId);
-                return false;
-            }
-            IAsr genericAsr = this.ServiceProvider.GetRequiredKeyedService<IAsr>(GlobalProviderNames.GLOBAL_ASR);
-            if (!genericAsr.IsSherpaModel && !genericAsr.Build(this.GetSelectedSetting("ASR", this.Config.ModelConfig)))
-            {
-                this.Logger.LogError("无法构建 {modelName} 提供程序。", genericAsr.ModelName);
-                return false;
-            }
-            deviceContext.ActiveCall.AIAgentContext.PrivateProvider.SetAsr(genericAsr);
-            this.Logger.LogInformation("设备 {deviceId} 的通用 ASR {modeName} 模型已初始化。", deviceContext.DeviceId, genericAsr.ModelName);
-            return true;
-        }
-
-        private bool RegisterGlobalLlmProviders(DeviceContext deviceContext)
-        {
-            if (deviceContext.ActiveCall is null)
-            {
-                this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法构建处理器。", deviceContext.DeviceId);
-                return false;
-            }
-            ILlm genericLlm = this.ServiceProvider.GetRequiredService<ILlm>();
-
-            ModelSetting selectedIntentLLMModelSetting = this.GetSelectedSetting("Intent", this.Config.ModelConfig);
-            string intentType = selectedIntentLLMModelSetting.Config.GetConfigValueOrDefault("Type", "None");
-
-            ModelSetting selectedChatLLMModelSetting = this.GetSelectedSetting("LLM", this.Config.ModelConfig);
-            selectedChatLLMModelSetting.Config.SetConfigValue("IntentType", intentType);
-
-            ModelSetting intentResponseAgentSetting = new ModelSetting
-            {
-                ModelName = selectedIntentLLMModelSetting.ModelName,
-                Config = new Dictionary<string, string>(selectedIntentLLMModelSetting.Config)
-            };
-
-            ModelSetting inputAgentSetting = new ModelSetting
-            {
-                ModelName = SubAgentNames.InputAgent,
-                Config = new Dictionary<string, string>
-                {
-                   { "IntentType", intentType }
-                }
-            };
-
-            Dictionary<string, ModelSetting> agentSettings = new Dictionary<string, ModelSetting>
-            {
-                { SubAgentNames.InputAgent, inputAgentSetting },
-                { SubAgentNames.IntentDetectionAgent, selectedIntentLLMModelSetting },
-                { SubAgentNames.FunctionCallAgent, ModelSetting.Empty },
-                { SubAgentNames.IntentResponseAgent, intentResponseAgentSetting },
-                { SubAgentNames.ChatAgent, selectedChatLLMModelSetting },
-                { SubAgentNames.OutputAgent, ModelSetting.Empty },
-            };
-
-            LLMBuildConfig llmBuildConfig = new LLMBuildConfig(
-                agentSettings,
-                deviceContext.ActiveCall.AIAgentContext.PrivateProvider);
-
-            if (!genericLlm.Build(llmBuildConfig))
-            {
-                this.Logger.LogError("无法为设备 {deviceId} 构建通用 LLM 模型。", deviceContext.DeviceId);
-                return false;
-            }
-            deviceContext.ActiveCall.AIAgentContext.PrivateProvider.SetLlm(genericLlm);
-
-            this.Logger.LogInformation("设备 {deviceId} 的通用 LLM 模型已初始化。", deviceContext.DeviceId);
-            return true;
-        }
-
-        private bool RegisterGlobalTtsProviders(DeviceContext deviceContext)
-        {
-            if (deviceContext.ActiveCall is null)
-            {
-                this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法构建处理器。", deviceContext.DeviceId);
-                return false;
-            }
-            ITts genericTts = this.ServiceProvider.GetRequiredKeyedService<ITts>(GlobalProviderNames.GLOBAL_TTS);
-            if (!genericTts.IsSherpaModel && !genericTts.Build(this.GetSelectedSetting("TTS", this.Config.ModelConfig)))
-            {
-                this.Logger.LogError("无法构建 {modelName} 提供程序。", genericTts.ModelName);
-                return false;
-            }
-            deviceContext.ActiveCall.AIAgentContext.PrivateProvider.SetTts(genericTts);
-            this.Logger.LogInformation("设备 {deviceId} 的通用 TTS {modeName} 模型已初始化。", deviceContext.DeviceId, genericTts.ModelName);
-            return true;
-        }
     }
 }

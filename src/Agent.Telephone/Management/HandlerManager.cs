@@ -38,7 +38,7 @@ namespace Agent.Telephone.Management
 
         public override bool BuildComponent() => true;
 
-        public async Task<bool> OnSIPDeviceRegisteredAsync(DeviceContext deviceContext, SIPTransport sipTransport, SIPRequest sipRequest)
+        public override async Task<bool> OnSIPDeviceRegisteredAsync(DeviceContext deviceContext, SIPTransport sipTransport, SIPRequest sipRequest)
         {
             var activeCall = this.ServiceProvider.GetRequiredService<ActiveCallHandler>();
             var rtp = this.ServiceProvider.GetRequiredService<RTPHandler>();

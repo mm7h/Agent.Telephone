@@ -1,11 +1,10 @@
-﻿namespace Agent.Telephone.Abstractions.Configs
+namespace Agent.Telephone.Abstractions.Configs
 {
     public class AssistantConfig
     {
         public AssistantConfig()
         {
-            this.GuestServiceAgent = false;
-            this.DialingNumber = "1001";
+            this.DialingNumber = string.Empty;
             this.Name = string.Empty;
             this.Prompt = string.Empty;
             this.VAD = string.Empty;
@@ -15,7 +14,6 @@
             this.TTS = string.Empty;
             this.Memory = string.Empty;
         }
-        public bool GuestServiceAgent { get; set; }
         public string DialingNumber { get; set; }
         public string Name { get; set; }
         public string Prompt { get; set; }

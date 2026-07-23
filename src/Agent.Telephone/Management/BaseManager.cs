@@ -1,4 +1,4 @@
-﻿using Agent.Telephone.Abstractions.Configs;
+using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Contexts;
 using Microsoft.Extensions.Logging;
 using SIPSorcery.SIP;
@@ -22,7 +22,9 @@ namespace Agent.Telephone.Management
         public static string ConvertToKebabCase(string input)
         {
             if (string.IsNullOrWhiteSpace(input))
+            {
                 return input;
+            }
 
             return Regex.Replace(input, "(?<!^)([A-Z])", "-$1").ToLower();
         }

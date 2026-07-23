@@ -31,6 +31,7 @@ namespace Agent.Telephone.Common.Contexts
         public void InitializeCallSession(SIPRequest sipRequest)
         {
             this.CloseCallSession();
+
             this.ActiveCall = new ActiveCallContext(this._sipTransport, sipRequest, this);
         }
 

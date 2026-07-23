@@ -1,4 +1,4 @@
-﻿using Microsoft.Agents.AI.Workflows;
+using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -74,7 +74,7 @@ namespace Agent.Telephone.Providers.LLM
                         }
                         else
                         {
-                            //todo: log
+                            this.Logger.LogError("构建 Sub Agent {agentName} 失败。", agent.AgentName);
                             return false;
                         }
                     })

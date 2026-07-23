@@ -13,7 +13,6 @@
   },
   "AssistantConfigs": [
     {
-      "GuestServiceAgent": true,
       "DialingNumber": "10086",
       "Name": "DefaultAssistant 1",
       "Prompt": "",
@@ -25,7 +24,6 @@
       "Memory": "FlashMemory"
     },
     {
-      "GuestServiceAgent": false,
       "DialingNumber": "10085",
       "Name": "DefaultAssistant 2",
       "Prompt": "",

@@ -39,7 +39,10 @@ namespace Agent.Telephone.Protocol.Server.Middlewares
 
         private async Task OnRequestReceivedAsync(SIPEndPoint local, SIPEndPoint remote, SIPRequest request)
         {
-            if (this._sipTransport is null) return;
+            if (this._sipTransport is null)
+            {
+                return;
+            }
             switch (request.Method)
             {
                 case SIPMethodsEnum.REGISTER:
