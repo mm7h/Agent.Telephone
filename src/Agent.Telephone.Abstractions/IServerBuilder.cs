@@ -1,5 +1,6 @@
-﻿using Microsoft.Extensions.Hosting;
-using Agent.Telephone.Abstractions.Configs;
+﻿using Agent.Telephone.Abstractions.Configs;
+using Agent.Telephone.Abstractions.FunctionTools;
+using Microsoft.Extensions.Hosting;
 
 namespace Agent.Telephone.Abstractions
 {
@@ -21,6 +22,18 @@ namespace Agent.Telephone.Abstractions
         /// </summary>
         /// <returns></returns>
         IServerBuilder WithVerify<T>() where T : class, IBasicVerify;
+        /// <summary>
+        /// 注册自定义函数工具。
+        /// </summary>
+        /// <typeparam name="TFunctionTool">需要注册的函数工具类型。</typeparam>
+        /// <returns></returns>
+        IServerBuilder WithFunctionTools<TFunctionTool>() where TFunctionTool : class, IFunctionTool, new();
+        /// <summary>
+        /// 注册自定义函数工具。
+        /// </summary>
+        /// <typeparam name="TFunctionTool">需要注册的函数工具类型。</typeparam>
+        /// <returns></returns>
+        IServerBuilder WithPrivateFunctionTools<TFunctionTool>() where TFunctionTool : class, IPrivateFunctionTool, new();
         /// <summary>
         /// 构建服务引擎
         /// </summary>

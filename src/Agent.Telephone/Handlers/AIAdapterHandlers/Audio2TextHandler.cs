@@ -108,11 +108,16 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 return;
             }
             this.Logger.LogDebug("设备 {deviceId} 检测到语音文本: {text}", this.DeviceContext.DeviceId, text);
+            this.ActiveCallContext.RestartTurn();
             Workflow<string> workflow = this._textWorkflowPool.Get();
-            workflow.Initialize(this.DeviceContext, text);
+            workflow.Initialize(this.ActiveCallContext, text);
             try
             {
-                this.NextWriter.WriteAsync(workflow, this.HandlerToken);
+                this.NextWriter
+                    .WriteAsync(workflow, this.HandlerToken)
+                    .AsTask()
+                    .GetAwaiter()
+                    .GetResult();
             }
             catch (OperationCanceledException)
             {
@@ -129,10 +134,6 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             if (this._asr is not null)
             {
                 this._asr.UnregisterDevice(this.DeviceContext.DeviceId);
-                if (!this._asr.IsSherpaModel)
-                {
-                    this._asr.Dispose();
-                }
             }
             this.NextWriter?.TryComplete();
             base.Dispose();

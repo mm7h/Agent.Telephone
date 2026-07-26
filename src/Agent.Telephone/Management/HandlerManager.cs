@@ -3,6 +3,7 @@ using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Handlers;
 using Agent.Telephone.Handlers.AIAdapterHandlers;
 using Agent.Telephone.Handlers.SIPHandlers;
+using Agent.Telephone.Providers.Conversation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -26,6 +27,7 @@ namespace Agent.Telephone.Management
             return builder.ConfigureServices((_, services) =>
             {
                 services.AddTransient<ActiveCallHandler>();
+                services.AddTransient<SIPCallControlHandler>();
                 services.AddTransient<RTPHandler>();
                 services.AddTransient<AudioReceivedHandler>();
                 services.AddTransient<Audio2TextHandler>();
@@ -38,9 +40,32 @@ namespace Agent.Telephone.Management
 
         public override bool BuildComponent() => true;
 
-        public override async Task<bool> OnSIPDeviceRegisteredAsync(DeviceContext deviceContext, SIPTransport sipTransport, SIPRequest sipRequest)
+        public override Task<bool> OnSIPDeviceRegisteredAsync(
+            DeviceContext deviceContext,
+            SIPTransport sipTransport,
+            SIPRequest sipRequest)
         {
+            return this.BuildHandlersAsync(deviceContext, sipRequest);
+        }
+
+        public Task<bool> BuildForConnectedCallAsync(DeviceContext deviceContext)
+        {
+            return this.BuildHandlersAsync(deviceContext, answerRequest: null);
+        }
+
+        private async Task<bool> BuildHandlersAsync(
+            DeviceContext deviceContext,
+            SIPRequest? answerRequest)
+        {
+            ActiveCallContext? activeCallContext = deviceContext.ActiveCall;
+            if (activeCallContext is null)
+            {
+                this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法构建处理程序管道。", deviceContext.DeviceId);
+                return false;
+            }
+
             var activeCall = this.ServiceProvider.GetRequiredService<ActiveCallHandler>();
+            var callControl = this.ServiceProvider.GetRequiredService<SIPCallControlHandler>();
             var rtp = this.ServiceProvider.GetRequiredService<RTPHandler>();
             var audioReceived = this.ServiceProvider.GetRequiredService<AudioReceivedHandler>();
             var audio2Text = this.ServiceProvider.GetRequiredService<Audio2TextHandler>();
@@ -51,6 +76,7 @@ namespace Agent.Telephone.Management
             IDictionary<string, IHandler> handlerContainer = new Dictionary<string, IHandler>
             {
                 [activeCall.HandlerName] = activeCall,
+                [callControl.HandlerName] = callControl,
                 [rtp.HandlerName] = rtp,
                 [audioReceived.HandlerName] = audioReceived,
                 [audio2Text.HandlerName] = audio2Text,
@@ -59,35 +85,111 @@ namespace Agent.Telephone.Management
                 [audioSend.HandlerName] = audioSend
             };
 
-            bool buildResults = handlerContainer.Values
-                 .Select(h => {
-                     this.InitializeDeviceContext(deviceContext, h);
-                     return h.Build();
-                 })
-                 .All(result => result);
-
-            if (!buildResults)
+            HandlerResourcesLifetime? resources = null;
+            try
             {
-                this.Logger.LogError("无法为设备 {deviceId} 构建处理程序管道。", deviceContext.DeviceId);
+                foreach (IHandler handler in handlerContainer.Values)
+                {
+                    this.InitializeDeviceContext(deviceContext, handler);
+                    if (!handler.Build())
+                    {
+                        this.Logger.LogError("无法为设备 {deviceId} 构建处理程序管道。", deviceContext.DeviceId);
+                        foreach (IHandler createdHandler in handlerContainer.Values)
+                        {
+                            createdHandler.Dispose();
+                        }
+                        return false;
+                    }
+                }
+
+                List<Action> completeWriters = [];
+                List<Task> handlerTasks = [];
+                this.BuildHandlersWorkflow(rtp, audioReceived, completeWriters, handlerTasks);
+                this.BuildHandlersWorkflow(audioReceived, audio2Text, completeWriters, handlerTasks);
+                this.BuildHandlersWorkflow(audio2Text, dialogue, completeWriters, handlerTasks);
+                this.BuildHandlersWorkflow(dialogue, text2Audio, completeWriters, handlerTasks);
+                this.BuildHandlersWorkflow(text2Audio, audioSend, completeWriters, handlerTasks);
+                resources = new HandlerResourcesLifetime(
+                    handlerContainer.Values.ToArray(),
+                    new HandlerPipelineLifetime(completeWriters, handlerTasks, this.Logger));
+                activeCallContext.RegisterOwnedResource(resources);
+                resources = null;
+            }
+            catch (Exception exception)
+            {
+                if (resources is not null)
+                {
+                    resources.Dispose();
+                }
+                else
+                {
+                    foreach (IHandler handler in handlerContainer.Values)
+                    {
+                        handler.Dispose();
+                    }
+                }
+                this.Logger.LogError(
+                    exception,
+                    "为设备 {deviceId} 构建处理程序管道时失败。",
+                    deviceContext.DeviceId);
                 return false;
             }
 
-            this.BuildHandlersWorkflow(rtp, audioReceived);
-            this.BuildHandlersWorkflow(audioReceived, audio2Text);
-            this.BuildHandlersWorkflow(audio2Text, dialogue);
-            this.BuildHandlersWorkflow(dialogue, text2Audio);
-            this.BuildHandlersWorkflow(text2Audio, audioSend);
+            if (answerRequest is null)
+            {
+                return true;
+            }
 
-
-
-            return await activeCall.AnswerAsync(sipRequest);
+            bool answered = await activeCall.AnswerAsync(answerRequest);
+            if (answered)
+            {
+                this.ServiceProvider
+                    .GetRequiredService<InboundMessagePlayer>()
+                    .Start(activeCallContext, text2Audio);
+            }
+            return answered;
         }
+
+        private sealed class HandlerResourcesLifetime : IDisposable
+        {
+            private IReadOnlyList<IHandler>? _handlers;
+            private HandlerPipelineLifetime? _pipeline;
+
+            public HandlerResourcesLifetime(
+                IReadOnlyList<IHandler> handlers,
+                HandlerPipelineLifetime pipeline)
+            {
+                this._handlers = handlers;
+                this._pipeline = pipeline;
+            }
+
+            public void Dispose()
+            {
+                Interlocked.Exchange(ref this._pipeline, null)?.Dispose();
+                IReadOnlyList<IHandler>? handlers =
+                    Interlocked.Exchange(ref this._handlers, null);
+                if (handlers is null)
+                {
+                    return;
+                }
+
+                for (int index = handlers.Count - 1; index >= 0; index--)
+                {
+                    handlers[index].Dispose();
+                }
+            }
+        }
+
         private void InitializeDeviceContext(DeviceContext deviceContext, IHandler handler)
         {
             handler.DeviceContext = deviceContext;
         }
 
-        private void BuildHandlersWorkflow<T>(IOutAIAdapterHandler<T> previous, IInAIAdapterHandler<T> next)
+        private void BuildHandlersWorkflow<T>(
+            IOutAIAdapterHandler<T> previous,
+            IInAIAdapterHandler<T> next,
+            ICollection<Action> completeWriters,
+            ICollection<Task> handlerTasks)
         {
             BoundedChannelOptions boundedChannelOptions = new BoundedChannelOptions(CHANNEL_CAPACITY)
             {
@@ -99,8 +201,52 @@ namespace Agent.Telephone.Management
             previous.NextWriter = channel.Writer;
             next.PreviousReader = channel.Reader;
 
-            Task.Run(next.HandleAsync);
+            completeWriters.Add(() => channel.Writer.TryComplete());
+            handlerTasks.Add(Task.Run(next.HandleAsync));
             this.Logger?.LogDebug("已构建处理程序工作流，上一步：{previous} -> 下一步：{next}", previous.GetType().Name, next.GetType().Name);
+        }
+
+        private sealed class HandlerPipelineLifetime : IDisposable
+        {
+            private IReadOnlyList<Action>? _completeWriters;
+            private readonly IReadOnlyList<Task> _handlerTasks;
+            private readonly ILogger _logger;
+
+            public HandlerPipelineLifetime(
+                IReadOnlyList<Action> completeWriters,
+                IReadOnlyList<Task> handlerTasks,
+                ILogger logger)
+            {
+                this._completeWriters = completeWriters;
+                this._handlerTasks = handlerTasks;
+                this._logger = logger;
+            }
+
+            public void Dispose()
+            {
+                IReadOnlyList<Action>? completeWriters =
+                    Interlocked.Exchange(ref this._completeWriters, null);
+                if (completeWriters is null)
+                {
+                    return;
+                }
+
+                foreach (Action complete in completeWriters)
+                {
+                    complete();
+                }
+
+                try
+                {
+                    Task.WhenAll(this._handlerTasks).GetAwaiter().GetResult();
+                }
+                catch (Exception exception)
+                {
+                    this._logger.LogError(
+                        exception,
+                        "等待通话 Handler 后台管线结束时失败。");
+                }
+            }
         }
     }
 }

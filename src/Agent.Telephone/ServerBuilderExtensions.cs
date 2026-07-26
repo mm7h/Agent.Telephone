@@ -23,17 +23,30 @@ namespace Agent.Telephone
         {
             return HandlerManager.RegisterServices(builder);
         }
+
+        public static IHostBuilder RegisterFunctionTools(this IHostBuilder builder)
+        {
+            return FunctionToolManager.RegisterServices(builder);
+        }
+
         public static IHostBuilder RegisterObjectPools(this IHostBuilder builder)
         {
             return builder.ConfigureServices((_, services) =>
             {
                 services.AddSingleton<ObjectPoolProvider, DefaultObjectPoolProvider>();
+
                 services.AddSingleton<ObjectPool<OutSegment>>(serviceProvider =>
                     serviceProvider.GetRequiredService<ObjectPoolProvider>().Create(new OutSegmentPolicy()));
+
                 services.AddSingleton<ObjectPool<Workflow<float[]>>>(serviceProvider =>
                     serviceProvider.GetRequiredService<ObjectPoolProvider>().Create(new WorkflowPolicy<float[]>()));
+
+                services.AddSingleton<ObjectPool<Workflow<byte[]>>>(serviceProvider =>
+                    serviceProvider.GetRequiredService<ObjectPoolProvider>().Create(new WorkflowPolicy<byte[]>()));
+
                 services.AddSingleton<ObjectPool<Workflow<string>>>(serviceProvider =>
                     serviceProvider.GetRequiredService<ObjectPoolProvider>().Create(new WorkflowPolicy<string>()));
+
                 services.AddSingleton<ObjectPool<Workflow<OutSegment>>>(serviceProvider =>
                     serviceProvider.GetRequiredService<ObjectPoolProvider>().Create(new WorkflowPolicy<OutSegment>()));
             });

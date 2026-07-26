@@ -1,20 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Net;
-using System.Net.Sockets;
-using System.Threading;
-using System.Threading.Tasks;
-using SIPSorcery.Media;
-using SIPSorcery.Net;
-using SIPSorcery.SIP;
-using SIPSorcery.SIP.App;
-using SIPSorceryMedia.Abstractions;
+﻿using Agent.Telephone.Abstractions;
+using Microsoft.Extensions.Hosting;
 
 namespace Agent.Telephone
 {
     public static class EngineFactory
-    { 
-        
+    {
+        public static IServerBuilder CreateAgentTelephoneBuilder()
+        {
+            return ServerBuilder.CreateServerBuilder();
+        }
+
+        public static IServerBuilder AsAgentTelephoneHostBuilder(this IHostBuilder hostBuilder)
+        {
+            return ServerBuilder.CreateServerBuilder(hostBuilder);
+        }
     }
 }

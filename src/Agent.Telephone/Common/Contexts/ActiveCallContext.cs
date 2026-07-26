@@ -12,16 +12,26 @@ namespace Agent.Telephone.Common.Contexts
     internal sealed class ActiveCallContext : IDisposable
     {
         private readonly DeviceContext _deviceContext;
+        private readonly string _userAor;
         private readonly CancellationTokenSource _callCts = new();
         private readonly object _turnLock = new();
+        private readonly object _lifetimeLock = new();
+        private readonly List<IDisposable> _ownedResources = [];
         private CancellationTokenSource _turnCts;
         private long _turnId;
+        private int _useCount;
+        private bool _disposeRequested;
+        private bool _callEnded;
+        private int _agentMediaPaused;
 
         public ActiveCallContext(SIPTransport sipTransport, SIPRequest sipRequest, DeviceContext deviceContext)
         {
             this._deviceContext = deviceContext;
+            this._userAor = deviceContext.Registration?.Aor.ToString()
+                ?? throw new InvalidOperationException("The device has no active registration.");
+            this.CallId = Guid.NewGuid().ToString("N");
             this.DeviceId = deviceContext.DeviceId;
-            this._turnCts = CancellationTokenSource.CreateLinkedTokenSource(this._callCts.Token);
+            this._turnCts = new CancellationTokenSource();
 
             this.CreateSIPUserAgent(sipTransport);
             this.CreateVoIPMediaSession();
@@ -29,7 +39,30 @@ namespace Agent.Telephone.Common.Contexts
             this.GetPhoneNumbers(sipRequest);
             this.CreateAIAgentContext();
         }
+
+        public ActiveCallContext(
+            DeviceContext deviceContext,
+            string userAor,
+            string assistantNumber,
+            SIPUserAgent userAgent,
+            VoIPMediaSession mediaSession)
+        {
+            this._deviceContext = deviceContext;
+            this._userAor = userAor;
+            this.CallId = Guid.NewGuid().ToString("N");
+            this.DeviceId = deviceContext.DeviceId;
+            this._turnCts = new CancellationTokenSource();
+            this.UserAgent = userAgent;
+            this.VoIPRTP = mediaSession;
+            this.PacketTimeMs = AudioProcessSettings.DefaultPacketTimeMs;
+            this.MaxPacketTimeMs = this.PacketTimeMs;
+            this.CallerNumber = SIPURI.ParseSIPURI(userAor).User;
+            this.DialedNumber = assistantNumber;
+            this.CreateAIAgentContext();
+        }
+        public string CallId { get; }
         public string DeviceId { get; }
+        public string UserAor => this._userAor;
         public SIPUserAgent UserAgent { get; private set; }
         public VoIPMediaSession VoIPRTP { get; private set; }
         public int PacketTimeMs { get; private set; }
@@ -40,10 +73,54 @@ namespace Agent.Telephone.Common.Contexts
         public AIAgentContext AIAgentContext { get; private set; }
         public AssistantConfig AssistantConfig { get; private set; }
         public long TurnId => Interlocked.Read(ref this._turnId);
+        public CancellationToken CallToken => this._callCts.Token;
         public CancellationToken Token => this._turnCts.Token;
+        public bool IsAgentMediaPaused => Volatile.Read(ref this._agentMediaPaused) != 0;
         public event Action<CancellationToken>? TurnTokenChanged;
 
         public void Cancel() => this._callCts.Cancel();
+
+        public void PauseAgentMedia() => Interlocked.Exchange(ref this._agentMediaPaused, 1);
+        public void ResumeAgentMedia() => Interlocked.Exchange(ref this._agentMediaPaused, 0);
+        public void MarkTransferDialing() =>
+            this._deviceContext.MarkTransferDialing(this);
+        public void MarkBridged() =>
+            this._deviceContext.MarkBridged(this);
+        public void MarkPlayingPrompt() =>
+            this._deviceContext.MarkPlayingPrompt(this);
+        public void MarkEnding() =>
+            this._deviceContext.MarkCallEnding(this);
+
+        public bool TryAcquireUse(out IDisposable? lease)
+        {
+            lock (this._lifetimeLock)
+            {
+                if (this._disposeRequested)
+                {
+                    lease = null;
+                    return false;
+                }
+
+                this._useCount++;
+                lease = new CallUseLease(this);
+                return true;
+            }
+        }
+
+        public void RegisterOwnedResource(IDisposable resource)
+        {
+            ArgumentNullException.ThrowIfNull(resource);
+
+            lock (this._lifetimeLock)
+            {
+                if (this._disposeRequested)
+                {
+                    throw new ObjectDisposedException(nameof(ActiveCallContext));
+                }
+
+                this._ownedResources.Add(resource);
+            }
+        }
 
         public void RestartTurn()
         {
@@ -57,7 +134,7 @@ namespace Agent.Telephone.Common.Contexts
                 }
 
                 previous = this._turnCts;
-                this._turnCts = CancellationTokenSource.CreateLinkedTokenSource(this._callCts.Token);
+                this._turnCts = new CancellationTokenSource();
                 Interlocked.Increment(ref this._turnId);
                 nextToken = this._turnCts.Token;
             }
@@ -152,10 +229,85 @@ namespace Agent.Telephone.Common.Contexts
 
         public void Dispose()
         {
-            this._callCts.Cancel();
+            this.EndCallTransport();
+
+            lock (this._lifetimeLock)
+            {
+                if (this._disposeRequested)
+                {
+                    return;
+                }
+
+                this._disposeRequested = true;
+                if (this._useCount > 0)
+                {
+                    return;
+                }
+            }
+
+            this.DisposeCore();
+        }
+
+        private void ReleaseUse()
+        {
+            bool shouldDispose = false;
+            lock (this._lifetimeLock)
+            {
+                this._useCount--;
+                shouldDispose = this._disposeRequested && this._useCount == 0;
+            }
+
+            if (shouldDispose)
+            {
+                ThreadPool.QueueUserWorkItem(
+                    static state => ((ActiveCallContext)state!).DisposeCore(),
+                    this);
+            }
+        }
+
+        private void DisposeCore()
+        {
+            this.EndCallTransport();
+            this._turnCts.Cancel();
+            for (int index = this._ownedResources.Count - 1; index >= 0; index--)
+            {
+                this._ownedResources[index].Dispose();
+            }
+            this._ownedResources.Clear();
+            this.AIAgentContext.Dispose();
             this._turnCts.Dispose();
-            this.VoIPRTP.Close("call ended");
             this._callCts.Dispose();
+        }
+
+        private void EndCallTransport()
+        {
+            lock (this._lifetimeLock)
+            {
+                if (this._callEnded)
+                {
+                    return;
+                }
+
+                this._callEnded = true;
+            }
+
+            this._callCts.Cancel();
+            this.VoIPRTP.Close("call ended");
+        }
+
+        private sealed class CallUseLease : IDisposable
+        {
+            private ActiveCallContext? _activeCall;
+
+            public CallUseLease(ActiveCallContext activeCall)
+            {
+                this._activeCall = activeCall;
+            }
+
+            public void Dispose()
+            {
+                Interlocked.Exchange(ref this._activeCall, null)?.ReleaseUse();
+            }
         }
     }
 }

@@ -99,7 +99,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
             try
             {
-                float[] pcmData = await this._audioProcessor.DecodeAsync(workflow.Data, this.DeviceContext.ActiveCall.NegotiatedAudioFormat, this.HandlerToken);
+                float[] pcmData = await this._audioProcessor.DecodeAsync(workflow.Data, this.ActiveCallContext.NegotiatedAudioFormat, this.HandlerToken);
 
                 this.HandlerToken.ThrowIfCancellationRequested();
 
@@ -136,11 +136,15 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
 
             var workflow = this._audioWorkflowPool.Get();
-            workflow.Initialize(this.DeviceContext, audioData);
+            workflow.Initialize(this.ActiveCallContext, audioData);
 
             try
             {
-                this.NextWriter.WriteAsync(workflow, this.HandlerToken);
+                this.NextWriter
+                    .WriteAsync(workflow, this.HandlerToken)
+                    .AsTask()
+                    .GetAwaiter()
+                    .GetResult();
             }
             catch (OperationCanceledException)
             {
@@ -167,10 +171,6 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             if (this._vad is not null)
             {
                 this._vad.UnregisterDevice(this.DeviceContext.DeviceId);
-                if (!this._vad.IsSherpaModel)
-                {
-                    this._vad.Dispose();
-                }
             }
 
             this.NextWriter?.TryComplete();

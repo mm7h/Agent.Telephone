@@ -12,6 +12,7 @@ using Agent.Telephone.Common.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Common.Exceptions;
+using Agent.Telephone.Providers.LLM.Agents;
 using Agent.Telephone.Providers.LLM.Contexts;
 using Agent.Telephone.Abstractions.Configs;
 
@@ -160,7 +161,10 @@ namespace Agent.Telephone.Providers.LLM
 
         public IReadOnlyList<ChatMessage> GetChatHistory()
         {
-            throw new NotImplementedException();
+            return this._subAgents.TryGetValue(SubAgentNames.ChatAgent, out IAgent? agent)
+                && agent is ChatAgent chatAgent
+                    ? chatAgent.ChatHistory
+                    : [];
         }
 
         protected override string GenerateId()
@@ -244,6 +248,7 @@ namespace Agent.Telephone.Providers.LLM
                 }
                 this.Logger.LogError(ex, "Unexpected error in {providerType} dialogue workflow.", this.ProviderType);
                 this.OnTokenGenerated?.Invoke(allSegments);
+                throw;
             }
         }
 

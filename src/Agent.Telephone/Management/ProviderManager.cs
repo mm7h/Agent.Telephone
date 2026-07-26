@@ -1,4 +1,4 @@
-using System.ClientModel;
+﻿using System.ClientModel;
 using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Configs;
 using Agent.Telephone.Common.Constants;
@@ -8,6 +8,8 @@ using Agent.Telephone.Helpers;
 using Agent.Telephone.Providers;
 using Agent.Telephone.Providers.ASR.Sherpa;
 using Agent.Telephone.Providers.AudioProcessor;
+using Agent.Telephone.Providers.CallControl;
+using Agent.Telephone.Providers.Conversation;
 using Agent.Telephone.Providers.LLM;
 using Agent.Telephone.Providers.LLM.Agents;
 using Agent.Telephone.Providers.LLM.Agents.Intent;
@@ -15,25 +17,38 @@ using Agent.Telephone.Providers.TTS.Huoshan;
 using Agent.Telephone.Providers.TTS.Sherpa;
 using Agent.Telephone.Providers.VAD.Native;
 using Agent.Telephone.Providers.VAD.Sherpa;
+using Agent.Telephone.Resources.Audio;
 using Flurl.Http.Configuration;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
+using SIPSorcery.Media;
 using SIPSorcery.SIP;
+using SIPSorceryMedia.Abstractions;
 
 namespace Agent.Telephone.Management
 {
     internal sealed class ProviderManager : BaseManager
     {
-        public ProviderManager(IServiceProvider serviceProvider, TelephoneConfig config, ILogger<ProviderManager> logger)
-            : base(serviceProvider, config, logger) { }
+        private readonly ConversationProvider _conversationProvider;
+
+        public ProviderManager(
+            IServiceProvider serviceProvider,
+            TelephoneConfig config,
+            ConversationProvider conversationProvider,
+            ILogger<ProviderManager> logger)
+            : base(serviceProvider, config, logger)
+        {
+            this._conversationProvider = conversationProvider;
+        }
 
         public static IHostBuilder RegisterServices(IHostBuilder builder, TelephoneConfig config)
         {
             return builder.ConfigureServices((_, services) =>
             {
+                services.AddSingleton<CallControlProvider>();
                 RegisterAudioProcessor(services);
                 RegisterVad(services, config.ModelConfig, GlobalProviderNames.GLOBAL_VAD);
                 RegisterAsr(services, config.ModelConfig, GlobalProviderNames.GLOBAL_ASR);
@@ -48,9 +63,23 @@ namespace Agent.Telephone.Management
         {
             try
             {
+                CallControlProvider callControl =
+                    this.ServiceProvider.GetRequiredService<CallControlProvider>();
+                if (!callControl.Build(ModelSetting.Empty))
+                {
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", callControl.ModelName);
+                    return false;
+                }
+
+                if (!this._conversationProvider.Build(ModelSetting.Empty))
+                {
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", this._conversationProvider.ModelName);
+                    return false;
+                }
+
                 #region Vad
                 IVad vad = this.ServiceProvider.GetRequiredKeyedService<IVad>(GlobalProviderNames.GLOBAL_VAD);
-                if (vad.IsSherpaModel && !vad.Build(this.GetSelectedSetting("VAD", this.Config.ModelConfig)))
+                if (vad.IsSherpaModel && !vad.Build(this.GetSelectedSherpaSetting("VAD", this.Config.ModelConfig)))
                 {
                     this.Logger.LogError("无法构建 {modelName} 提供程序。", vad.ModelName);
                     return false;
@@ -59,7 +88,7 @@ namespace Agent.Telephone.Management
 
                 #region Asr
                 IAsr asr = this.ServiceProvider.GetRequiredKeyedService<IAsr>(GlobalProviderNames.GLOBAL_ASR);
-                if (asr.IsSherpaModel && !asr.Build(this.GetSelectedSetting("ASR", this.Config.ModelConfig)))
+                if (asr.IsSherpaModel && !asr.Build(this.GetSelectedSherpaSetting("ASR", this.Config.ModelConfig)))
                 {
                     this.Logger.LogError("无法构建 {modelName} 提供程序。", asr.ModelName);
                     return false;
@@ -68,7 +97,7 @@ namespace Agent.Telephone.Management
 
                 #region Tts
                 ITts tts = this.ServiceProvider.GetRequiredKeyedService<ITts>(GlobalProviderNames.GLOBAL_TTS);
-                if (tts.IsSherpaModel && !tts.Build(this.GetSelectedSetting("TTS", this.Config.ModelConfig)))
+                if (tts.IsSherpaModel && !tts.Build(this.GetSelectedSherpaSetting("TTS", this.Config.ModelConfig)))
                 {
                     this.Logger.LogError("无法构建 {modelName} 提供程序。", tts.ModelName);
                     return false;
@@ -84,53 +113,128 @@ namespace Agent.Telephone.Management
             }
         }
 
-        public override Task<bool> OnSIPDeviceRegisteredAsync(DeviceContext deviceContext, SIPTransport sipTransport, SIPRequest sipRequest)
+        public async Task<byte[]> DecodeAudioFileToPcmWaveAsync(
+            string? path,
+            CancellationToken cancellationToken = default)
         {
-            if (deviceContext.ActiveCall is null)
+            IAudioProcessor audioProcessor = this.ServiceProvider
+                .GetRequiredService<IAudioProcessor>();
+            try
+            {
+                if (!audioProcessor.Build(ModelSetting.Empty))
+                {
+                    return [];
+                }
+
+                return await audioProcessor
+                    .DecodeFileToPcmWaveAsync(path, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                audioProcessor.Dispose();
+            }
+        }
+
+        public async Task<bool> PlayPromptAsync(
+            string? path,
+            VoIPMediaSession mediaSession,
+            AudioFormat audioFormat,
+            CancellationToken cancellationToken)
+        {
+            IAudioProcessor audioProcessor = this.ServiceProvider
+                .GetRequiredService<IAudioProcessor>();
+            try
+            {
+                return audioProcessor.Build(ModelSetting.Empty) &&
+                    await audioProcessor.PlayFileAsync(
+                        path,
+                        mediaSession,
+                        audioFormat,
+                        cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                audioProcessor.Dispose();
+            }
+        }
+
+        public override Task<bool> OnSIPDeviceRegisteredAsync(
+            DeviceContext deviceContext,
+            SIPTransport sipTransport,
+            SIPRequest sipRequest)
+        {
+            return this.BuildForActiveCallAsync(deviceContext);
+        }
+
+        public async Task<bool> BuildForActiveCallAsync(DeviceContext deviceContext)
+        {
+            ActiveCallContext? activeCall = deviceContext.ActiveCall;
+            if (activeCall is null)
             {
                 this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法构建处理器。", deviceContext.DeviceId);
-                return Task.FromResult(false);
+                return false;
             }
-            PrivateProvider providers = deviceContext.ActiveCall.AIAgentContext.PrivateProvider;
+            PrivateProvider providers = activeCall.AIAgentContext.PrivateProvider;
+            IAudioProcessor? pendingAudioProcessor = null;
+            IVad? pendingVad = null;
+            IAsr? pendingAsr = null;
+            ILlm? pendingLlm = null;
+            ITts? pendingTts = null;
             try
             {
                 #region AudioProcessor Build
-                var audioProcessor = this.ServiceProvider.GetRequiredService<IAudioProcessor>();
-                if (!audioProcessor.Build(ModelSetting.Empty))
+                pendingAudioProcessor = this.ServiceProvider.GetRequiredService<IAudioProcessor>();
+                if (!pendingAudioProcessor.Build(ModelSetting.Empty))
                 {
-                    this.Logger.LogWarning("无法构建 {modelName} 提供程序。", audioProcessor.ModelName); return Task.FromResult(false);
+                    this.Logger.LogWarning("无法构建 {modelName} 提供程序。", pendingAudioProcessor.ModelName);
+                    return false;
                 }
-                providers.SetAudioProcessor(audioProcessor); 
+                providers.SetAudioProcessor(pendingAudioProcessor);
+                pendingAudioProcessor = null;
                 #endregion
 
                 #region VAD Build
-                var vad = this.ServiceProvider.GetRequiredKeyedService<IVad>(ConvertToKebabCase(deviceContext.ActiveCall.AssistantConfig.VAD));
-                if (!vad.IsSherpaModel && !vad.Build(this.GetSelectedSetting("VAD", this.Config.ModelConfig)))
+                pendingVad = this.ServiceProvider.GetRequiredKeyedService<IVad>(ConvertToKebabCase(activeCall.AssistantConfig.VAD));
+                if (!pendingVad.IsSherpaModel && !pendingVad.Build(this.GetConfiguredSetting("VAD", activeCall.AssistantConfig.VAD, this.Config.ModelConfig)))
                 {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", vad.ModelName);
-                    return Task.FromResult(false);
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", pendingVad.ModelName);
+                    return false;
                 }
-                providers.SetVad(vad);
+                providers.SetVad(pendingVad);
+                pendingVad = null;
                 #endregion
 
                 #region ASR Build
-                var asr = this.ServiceProvider.GetRequiredKeyedService<IAsr>(ConvertToKebabCase(deviceContext.ActiveCall.AssistantConfig.ASR));
-                if (!asr.IsSherpaModel && !asr.Build(this.GetSelectedSetting("ASR", this.Config.ModelConfig)))
+                pendingAsr = this.ServiceProvider.GetRequiredKeyedService<IAsr>(ConvertToKebabCase(activeCall.AssistantConfig.ASR));
+                if (!pendingAsr.IsSherpaModel && !pendingAsr.Build(this.GetConfiguredSetting("ASR", activeCall.AssistantConfig.ASR, this.Config.ModelConfig)))
                 {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", asr.ModelName);
-                    return Task.FromResult(false);
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", pendingAsr.ModelName);
+                    return false;
                 }
-                providers.SetAsr(asr);
+                providers.SetAsr(pendingAsr);
+                pendingAsr = null;
                 #endregion
 
                 #region LLM Build
-                var llm = this.ServiceProvider.GetRequiredKeyedService<ILlm>(ConvertToKebabCase(deviceContext.ActiveCall.AssistantConfig.LLM));
-
-                ModelSetting selectedIntentLLMModelSetting = this.GetSelectedSetting("Intent", this.Config.ModelConfig);
+                ModelSetting selectedIntentLLMModelSetting = this.GetConfiguredSetting("Intent", activeCall.AssistantConfig.Intent, this.Config.ModelConfig);
                 string intentType = selectedIntentLLMModelSetting.Config.GetConfigValueOrDefault("Type", "None");
 
-                ModelSetting selectedChatLLMModelSetting = this.GetSelectedSetting("LLM", this.Config.ModelConfig);
+                ModelSetting selectedChatLLMModelSetting = this.GetConfiguredSetting("LLM", activeCall.AssistantConfig.LLM, this.Config.ModelConfig);
                 selectedChatLLMModelSetting.Config.SetConfigValue("IntentType", intentType);
+                selectedChatLLMModelSetting.Config.SetConfigValue("Prompt", activeCall.AssistantConfig.Prompt);
+                int maximumTurns = this.GetMaximumMemoryTurns(activeCall.AssistantConfig);
+                string? recentMemory = await this._conversationProvider.BuildRecentMemoryAsync(
+                    activeCall.UserAor,
+                    activeCall.AssistantConfig.DialingNumber,
+                    maximumTurns,
+                    activeCall.CallToken).ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(recentMemory))
+                {
+                    selectedChatLLMModelSetting.Config.SetConfigValue("SummaryMemory", recentMemory);
+                }
+                pendingLlm = this.ServiceProvider.GetRequiredKeyedService<ILlm>(
+                    ConvertToKebabCase(activeCall.AssistantConfig.LLM));
 
                 ModelSetting intentResponseAgentSetting = new ModelSetting
                 {
@@ -159,37 +263,73 @@ namespace Agent.Telephone.Management
 
                 LLMBuildConfig llmBuildConfig = new LLMBuildConfig(
                     agentSettings,
-                    deviceContext.ActiveCall.AIAgentContext.PrivateProvider);
+                    activeCall.AIAgentContext.PrivateProvider);
 
-                if (!llm.Build(llmBuildConfig))
+                if (!pendingLlm.Build(llmBuildConfig))
                 {
                     this.Logger.LogError("无法为设备 {deviceId} 构建通用 LLM 模型。", deviceContext.DeviceId);
-                    return Task.FromResult(false);
+                    return false;
                 }
-                providers.SetLlm(llm);
+                providers.SetLlm(pendingLlm);
+                pendingLlm = null;
                 #endregion
 
                 #region TTS Build
-                var tts = this.ServiceProvider.GetRequiredKeyedService<ITts>(ConvertToKebabCase(deviceContext.ActiveCall.AssistantConfig.TTS));
-                if (!tts.IsSherpaModel && !tts.Build(this.GetSelectedSetting("TTS", this.Config.ModelConfig)))
+                pendingTts = this.ServiceProvider.GetRequiredKeyedService<ITts>(ConvertToKebabCase(activeCall.AssistantConfig.TTS));
+                if (!pendingTts.IsSherpaModel && !pendingTts.Build(this.GetConfiguredSetting("TTS", activeCall.AssistantConfig.TTS, this.Config.ModelConfig)))
                 {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", tts.ModelName);
-                    return Task.FromResult(false);
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", pendingTts.ModelName);
+                    return false;
                 }
-                providers.SetTts(tts); 
+                providers.SetTts(pendingTts);
+                pendingTts = null;
                 #endregion
 
-                return Task.FromResult(true);
+                return true;
             }
             catch (Exception exception)
             {
                 this.Logger.LogError(exception, "设备 {deviceId} 的 Provider 初始化失败。", deviceContext.DeviceId);
-                return Task.FromResult(false);
+                return false;
+            }
+            finally
+            {
+                pendingAudioProcessor?.Dispose();
+                if (pendingVad is { IsSherpaModel: false })
+                {
+                    pendingVad.Dispose();
+                }
+                if (pendingAsr is { IsSherpaModel: false })
+                {
+                    pendingAsr.Dispose();
+                }
+                pendingLlm?.Dispose();
+                if (pendingTts is { IsSherpaModel: false })
+                {
+                    pendingTts.Dispose();
+                }
             }
         }
-        private ModelSetting GetSelectedSetting(string selectedModelType, ModelConfig config)
+
+        private int GetMaximumMemoryTurns(AssistantConfig assistant)
         {
-            string selectedModel = config.SelectedSettings[selectedModelType];
+            int configuredMaximum = this.Config.MessageStoreConfig.RecentConversationTurns;
+            if (this.Config.ModelConfig.ConfiguredSettings
+                    .TryGetValue("Memory", out var memories) &&
+                memories.TryGetValue(assistant.Memory, out var memoryConfig) &&
+                memoryConfig.TryGetValue("MaximumTurns", out string? configuredText) &&
+                int.TryParse(configuredText, out int parsed) &&
+                parsed > 0)
+            {
+                configuredMaximum = parsed;
+            }
+
+            return Math.Max(1, configuredMaximum);
+        }
+
+        private ModelSetting GetSelectedSherpaSetting(string selectedModelType, ModelConfig config)
+        {
+            string selectedModel = config.SelectedDefaultSettings[selectedModelType];
             Dictionary<string, string> setting = config.ConfiguredSettings[selectedModelType][selectedModel];
 
             ModelSetting modelSetting = new ModelSetting
@@ -200,12 +340,25 @@ namespace Agent.Telephone.Management
 
             return modelSetting;
         }
+        private ModelSetting GetConfiguredSetting(string selectedModelType, string selectedModel, ModelConfig config)
+        {
+            Dictionary<string, string> setting = config.ConfiguredSettings[selectedModelType][selectedModel];
 
+            ModelSetting modelSetting = new ModelSetting
+            {
+                ModelName = selectedModel,
+                Config = new Dictionary<string, string>(setting)
+            };
+
+            return modelSetting;
+        }
         #region Register providers
 
         #region AudioProcessor
         private static void RegisterAudioProcessor(IServiceCollection services)
         {
+            services.AddSingleton(_ => new AudioEncoder(SupportedAudioFormats.SupportedSDPAudioFormat));
+
             services.AddTransient<IAudioProcessor, DefaultAudioProcessor>();
         }
         #endregion
@@ -213,18 +366,38 @@ namespace Agent.Telephone.Management
         #region VAD
         private static void RegisterVad(IServiceCollection services, ModelConfig config, string key)
         {
-            string modelName = ConvertToKebabCase(config.SelectedSettings["VAD"]);
-            switch (modelName)
+            string selectedModelName = ConvertToKebabCase(config.SelectedDefaultSettings["VAD"]);
+            switch (selectedModelName)
             {
-                case "silero":
-                    services.AddKeyedSingleton<IVad, Silero>(key);
+                case "sense-voice":
+                    services.AddKeyedSingleton<IAsr, SenseVoice>(key);
+                    break;
+                case "paraformer":
+                    services.AddKeyedSingleton<IAsr, Paraformer>(key);
                     break;
                 case "silero-native":
-                    services.AddKeyedTransient<IVad, SileroNative>(modelName);
                     services.AddKeyedTransient<IVad, SileroNative>(key);
                     break;
                 default:
-                    throw new ModelBuildException("Invalid vad model.");
+                    throw new ModelBuildException("Invalid asr model.");
+            }
+            foreach (var vadSettingItem in config.ConfiguredSettings["VAD"])
+            {
+                string modelName = ConvertToKebabCase(vadSettingItem.Key);
+                switch (modelName)
+                {
+                    case "silero":
+                        services.AddKeyedSingleton<IVad, Silero>(key);
+                        break;
+                    case "paraformer":
+                        services.AddKeyedSingleton<IAsr, Paraformer>(key);
+                        break;
+                    case "silero-native":
+                        services.AddKeyedTransient<IVad, SileroNative>(key);
+                        break;
+                    default:
+                        throw new ModelBuildException("Invalid vad model.");
+                }
             }
         }
         #endregion
@@ -232,8 +405,8 @@ namespace Agent.Telephone.Management
         #region ASR
         private static void RegisterAsr(IServiceCollection services, ModelConfig config, string key)
         {
-            string modelName = ConvertToKebabCase(config.SelectedSettings["ASR"]);
-            switch (modelName)
+            string selectedModelName = ConvertToKebabCase(config.SelectedDefaultSettings["ASR"]);
+            switch (selectedModelName)
             {
                 case "sense-voice":
                     services.AddKeyedSingleton<IAsr, SenseVoice>(key);
@@ -243,6 +416,23 @@ namespace Agent.Telephone.Management
                     break;
                 default:
                     throw new ModelBuildException("Invalid asr model.");
+            }
+            foreach (var asrSettingItem in config.ConfiguredSettings["ASR"])
+            {
+                string modelName = ConvertToKebabCase(asrSettingItem.Key);
+                switch (modelName)
+                {
+                    case "sense-voice":
+                        services.AddKeyedSingleton<IAsr, SenseVoice>(modelName);
+                        services.AddKeyedSingleton<IAsr, SenseVoice>(key);
+                        break;
+                    case "paraformer":
+                        services.AddKeyedSingleton<IAsr, Paraformer>(modelName);
+                        services.AddKeyedSingleton<IAsr, Paraformer>(key);
+                        break;
+                    default:
+                        throw new ModelBuildException("Invalid asr model.");
+                }
             }
         }
         #endregion
@@ -286,23 +476,27 @@ namespace Agent.Telephone.Management
         #region TTS
         private static void RegisterTts(IServiceCollection services, ModelConfig config, string key)
         {
-            string modelName = ConvertToKebabCase(config.SelectedSettings["TTS"]);
-            switch (modelName)
+            string selectedModelName = ConvertToKebabCase(config.SelectedDefaultSettings["TTS"]);
+            switch (selectedModelName)
             {
                 case "kokoro":
                     services.AddKeyedSingleton<ITts, Kokoro>(key);
                     break;
                 case "huoshan-bidirection":
-                    services.AddKeyedTransient<ITts, HuoshanBidirectionTTS>(modelName);
                     services.AddKeyedTransient<ITts, HuoshanBidirectionTTS>(key);
                     break;
+                /*
+                case "huoshan-unidirectional":
+                    services.AddKeyedTransient<ITts, HuoshanUnidirectionalTTS>(modelName);
+                    services.AddKeyedTransient<ITts, HuoshanUnidirectionalTTS>(key);
+                    break;
+                */
                 case "huoshan-http":
                     services.AddSingleton(_ => new FlurlClientCache()
                     .Add(nameof(HuoshanHttpTTS), configure: builder =>
                     {
                         builder.Settings.JsonSerializer = new DefaultJsonSerializer(JsonHelper.OPTIONS);
                     }));
-                    services.AddKeyedTransient<ITts, HuoshanHttpTTS>(modelName);
                     services.AddKeyedTransient<ITts, HuoshanHttpTTS>(key);
                     break;
                 case "huoshan-http-v3":
@@ -311,12 +505,46 @@ namespace Agent.Telephone.Management
                     {
                         builder.Settings.JsonSerializer = new DefaultJsonSerializer(JsonHelper.OPTIONS);
                     }));
-                    services.AddKeyedTransient<ITts, HuoshanHttpV3TTS>(modelName);
                     services.AddKeyedTransient<ITts, HuoshanHttpV3TTS>(key);
                     break;
                 default:
                     throw new ModelBuildException("Invalid tts model.");
             }
+            foreach (var ttsSettingItem in config.ConfiguredSettings["TTS"])
+            {
+                string modelName = ConvertToKebabCase(ttsSettingItem.Key);
+                switch (modelName)
+                {
+                    case "kokoro":
+                        services.AddKeyedSingleton<ITts, Kokoro>(key);
+                        break;
+                    case "huoshan-bidirection":
+                        services.AddKeyedTransient<ITts, HuoshanBidirectionTTS>(modelName);
+                        services.AddKeyedTransient<ITts, HuoshanBidirectionTTS>(key);
+                        break;
+                    case "huoshan-http":
+                        services.AddSingleton(_ => new FlurlClientCache()
+                        .Add(nameof(HuoshanHttpTTS), configure: builder =>
+                        {
+                            builder.Settings.JsonSerializer = new DefaultJsonSerializer(JsonHelper.OPTIONS);
+                        }));
+                        services.AddKeyedTransient<ITts, HuoshanHttpTTS>(modelName);
+                        services.AddKeyedTransient<ITts, HuoshanHttpTTS>(key);
+                        break;
+                    case "huoshan-http-v3":
+                        services.AddSingleton(_ => new FlurlClientCache()
+                        .Add(nameof(HuoshanHttpV3TTS), configure: builder =>
+                        {
+                            builder.Settings.JsonSerializer = new DefaultJsonSerializer(JsonHelper.OPTIONS);
+                        }));
+                        services.AddKeyedTransient<ITts, HuoshanHttpV3TTS>(modelName);
+                        services.AddKeyedTransient<ITts, HuoshanHttpV3TTS>(key);
+                        break;
+                    default:
+                        throw new ModelBuildException("Invalid tts model.");
+                }
+            }
+
         }
         #endregion
 

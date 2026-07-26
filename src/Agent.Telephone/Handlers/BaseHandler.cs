@@ -8,6 +8,8 @@ namespace Agent.Telephone.Handlers
     {
         private CancellationTokenSource? _handlerCts;
         private CancellationTokenRegistration _tokenRegistration;
+        private ActiveCallContext? _activeCall;
+        private bool _continueAfterCallEnded;
         public BaseHandler(TelephoneConfig config, ILogger logger)
         {
             this.Config = config;
@@ -22,8 +24,10 @@ namespace Agent.Telephone.Handlers
         public abstract bool Build();
 
         protected CancellationToken HandlerToken { get; private set; }
+        protected ActiveCallContext ActiveCallContext => this._activeCall
+            ?? throw new InvalidOperationException("The handler has not been bound to an active call.");
 
-        protected void RegisterCancellationToken(DeviceContext deviceContext)
+        protected void RegisterCancellationToken(DeviceContext deviceContext, bool continueAfterCallEnded = false)
         {
             this.DeviceContext = deviceContext;
             ActiveCallContext? activeCall = deviceContext.ActiveCall;
@@ -32,15 +36,18 @@ namespace Agent.Telephone.Handlers
                 throw new InvalidOperationException("An active call is required before building a handler.");
             }
 
+            this._activeCall = activeCall;
+            this._continueAfterCallEnded = continueAfterCallEnded;
             activeCall.TurnTokenChanged += this.OnTurnTokenChanged;
             this.ReplaceHandlerToken(activeCall.Token);
         }
 
         protected bool CheckWorkflowValid<T>(Workflow<T> workflow)
         {
-            ActiveCallContext? activeCall = this.DeviceContext?.ActiveCall;
+            ActiveCallContext? activeCall = this._activeCall;
             return activeCall is not null
-                && workflow.DeviceId == this.DeviceContext!.DeviceId
+                && workflow.DeviceId == activeCall.DeviceId
+                && workflow.CallId == activeCall.CallId
                 && workflow.TurnId == activeCall.TurnId;
         }
 
@@ -58,16 +65,18 @@ namespace Agent.Telephone.Handlers
         {
             this._tokenRegistration.Dispose();
             this._handlerCts?.Dispose();
-            this._handlerCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            this._handlerCts = this._continueAfterCallEnded || this._activeCall is null
+                ? CancellationTokenSource.CreateLinkedTokenSource(token)
+                : CancellationTokenSource.CreateLinkedTokenSource(token, this._activeCall.CallToken);
             this.HandlerToken = this._handlerCts.Token;
             this._tokenRegistration = this.HandlerToken.Register(this.OnHandlerTokenChanged);
         }
 
         public virtual void Dispose()
         {
-            if (this.DeviceContext?.ActiveCall is not null)
+            if (this._activeCall is not null)
             {
-                this.DeviceContext.ActiveCall.TurnTokenChanged -= this.OnTurnTokenChanged;
+                this._activeCall.TurnTokenChanged -= this.OnTurnTokenChanged;
             }
             this._tokenRegistration.Dispose();
             this._handlerCts?.Dispose();

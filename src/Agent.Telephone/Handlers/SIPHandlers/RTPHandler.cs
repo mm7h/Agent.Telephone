@@ -1,4 +1,4 @@
-using Agent.Telephone.Abstractions.Configs;
+﻿using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Handlers.AIAdapterHandlers;
@@ -37,12 +37,12 @@ namespace Agent.Telephone.Handlers.SIPHandlers
                 return false;
             }
             this._rtpContext = this.DeviceContext.ActiveCall.VoIPRTP;
-            this._rtpContext.OnRtpPacketReceived += this.OnRtpPacketReceived;
+            this._rtpContext.OnRtpPacketReceived += this.OnRtpPacketReceivedAsync;
             this._rtpContext.OnAudioFormatsNegotiated += this.OnAudioFormatsNegotiated;
             return true;
         }
 
-        private async void OnRtpPacketReceived(IPEndPoint remoteEndPoint, SDPMediaTypesEnum mediaType, RTPPacket rtpPacket)
+        private async void OnRtpPacketReceivedAsync(IPEndPoint remoteEndPoint, SDPMediaTypesEnum mediaType, RTPPacket rtpPacket)
         {
             if (mediaType != SDPMediaTypesEnum.audio || rtpPacket.Payload.Length == 0)
             {
@@ -50,13 +50,19 @@ namespace Agent.Telephone.Handlers.SIPHandlers
                 return;
             }
 
-            if (this.DeviceContext.ActiveCall is null)
+            ActiveCallContext? activeCall = this.DeviceContext.ActiveCall;
+            if (activeCall is null)
             {
                 this.Logger.LogWarning("设备 {deviceId} 收到 RTP 包，但未找到活动呼叫上下文。", this.DeviceContext.DeviceId);
                 return;
             }
 
-            if (rtpPacket.Header.PayloadType != this.DeviceContext.ActiveCall.NegotiatedAudioFormat.FormatID)
+            if (activeCall.IsAgentMediaPaused)
+            {
+                return;
+            }
+
+            if (rtpPacket.Header.PayloadType != activeCall.NegotiatedAudioFormat.FormatID)
             {
                 this.Logger.LogDebug("忽略未协商的 RTP payload type {payloadType}。", rtpPacket.Header.PayloadType);
                 return;
@@ -77,7 +83,7 @@ namespace Agent.Telephone.Handlers.SIPHandlers
         {
             if (this.DeviceContext.ActiveCall is not null)
             {
-                this.DeviceContext.ActiveCall.NegotiatedAudioFormat = audioFormats.FirstOrDefault(format => format.Codec == AudioCodecsEnum.PCMU || format.Codec == AudioCodecsEnum.PCMA);
+                this.DeviceContext.ActiveCall.NegotiatedAudioFormat = audioFormats.FirstOrDefault(format => SupportedAudioFormats.SupportedAudioCodecs.Contains(format.Codec));
             }
             else
             { 
@@ -89,7 +95,7 @@ namespace Agent.Telephone.Handlers.SIPHandlers
         {
             if (this._rtpContext is not null)
             {
-                this._rtpContext.OnRtpPacketReceived -= this.OnRtpPacketReceived;
+                this._rtpContext.OnRtpPacketReceived -= this.OnRtpPacketReceivedAsync;
             }
         }
     }

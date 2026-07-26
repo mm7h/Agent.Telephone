@@ -1,5 +1,6 @@
 ﻿using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Resources;
+using Agent.Telephone.Resources.Audio;
 using Agent.Telephone.Resources.Editors;
 using Agent.Telephone.Resources.FileEncoders;
 using Agent.Telephone.Resources.OnnxModels;
@@ -24,6 +25,7 @@ namespace Agent.Telephone.Management
                 services.AddSingleton<IVadOnnxModel, SileroOnnx>();
                 services.AddSingleton<IAudioFileEncoder, FFmpegFileEncoder>();
                 services.AddSingleton<IAudioEditor, AudioEditor>();
+                services.AddSingleton<FfmpegAudioPlayer>();
 
                 services.AddSingleton<ResourceManager>();
             });
@@ -39,11 +41,17 @@ namespace Agent.Telephone.Management
             }
             #endregion
 
+            FfmpegAudioPlayer filePlayer = this.ServiceProvider.GetRequiredService<FfmpegAudioPlayer>();
+            if (!filePlayer.Load(ModelSetting.Empty))
+            {
+                return false;
+            }
+
             return FFmpegInit.EnsureBinariesRegistered();
         }
         private ModelSetting GetSelectedSetting(string selectedModelType, ModelConfig config)
         {
-            string selectedModel = config.SelectedSettings[selectedModelType];
+            string selectedModel = config.SelectedDefaultSettings[selectedModelType];
             Dictionary<string, string> setting = config.ConfiguredSettings[selectedModelType][selectedModel];
 
             ModelSetting modelSetting = new ModelSetting
@@ -59,7 +67,8 @@ namespace Agent.Telephone.Management
         {
             IList<IDisposable> resources = new List<IDisposable>
             {
-                this.ServiceProvider.GetRequiredService<IVadOnnxModel>()
+                this.ServiceProvider.GetRequiredService<IVadOnnxModel>(),
+                this.ServiceProvider.GetRequiredService<FfmpegAudioPlayer>()
             };
 
             foreach (IDisposable resource in resources)

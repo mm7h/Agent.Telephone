@@ -3,6 +3,7 @@ using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Common.Enums;
 using Agent.Telephone.Providers;
+using Agent.Telephone.Providers.Conversation;
 using Agent.Telephone.Providers.TTS;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
@@ -16,16 +17,22 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         private readonly ObjectPool<Workflow<OutSegment>> _segmentWorkflowPool;
         private readonly ObjectPool<OutSegment> _segmentPool;
         private readonly ObjectPool<Workflow<float[]>> _audioWorkflowPool;
+        private readonly ConversationProvider _conversationProvider;
+        private readonly SemaphoreSlim _synthesisLock = new(1, 1);
+        private long _activeTurnId;
+        private PromptCapture? _promptCapture;
 
         public Text2AudioHandler(ObjectPool<Workflow<OutSegment>> segmentWorkflowPool,
             ObjectPool<OutSegment> segmentPool,
             ObjectPool<Workflow<float[]>> audioWorkflowPool,
+            ConversationProvider conversationProvider,
             TelephoneConfig config,
             ILogger<Text2AudioHandler> logger) : base(config, logger)
         {
             this._segmentPool = segmentPool;
             this._segmentWorkflowPool = segmentWorkflowPool;
             this._audioWorkflowPool = audioWorkflowPool;
+            this._conversationProvider = conversationProvider;
         }
 
         public override string HandlerName => HandlerNames.Text2AudioHandlerName;
@@ -49,7 +56,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             this._tts = privateProvider.Tts;
             this._tts.RegisterDevice(this.DeviceContext.DeviceId, this);
 
-            this.RegisterCancellationToken(this.DeviceContext);
+            this.RegisterCancellationToken(this.DeviceContext, continueAfterCallEnded: true);
             return true;
         }
 
@@ -81,13 +88,31 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             try
             {
+                this._activeTurnId = workflow.TurnId;
                 if (string.IsNullOrWhiteSpace(workflow.Data.Content))
                 {
                     this.Logger.LogInformation("无需TTS，查询文本为空。");
+                    if (workflow.Data.IsLastSegment)
+                    {
+                        await this._conversationProvider
+                            .CompleteWithoutAudioAsync(
+                                this.ActiveCallContext,
+                                workflow.TurnId,
+                                CancellationToken.None)
+                            .ConfigureAwait(false);
+                    }
                     return;
                 }
                 this.HandlerToken.ThrowIfCancellationRequested();
-                await this._tts.SynthesisAsync(workflow, this.HandlerToken);
+                await this._synthesisLock.WaitAsync(this.HandlerToken);
+                try
+                {
+                    await this._tts.SynthesisAsync(workflow, this.HandlerToken);
+                }
+                finally
+                {
+                    this._synthesisLock.Release();
+                }
             }
             catch (OperationCanceledException)
             {
@@ -95,12 +120,18 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             catch (Exception exception)
             {
+                await this._conversationProvider
+                    .FailAsync(
+                        this.ActiveCallContext,
+                        workflow.TurnId,
+                        exception.Message,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
                 this.Logger.LogError(exception, "处理设备文本转语音时出错: {deviceId}。", this.DeviceContext.DeviceId);
             }
         }
         public void OnBeforeProcessing(string sentence, bool isFirstSegment, bool isLastSegment)
         {
-
         }
         public void OnProcessing(float[] audioData, bool isFirstFrame, bool isLastFrame)
         {
@@ -108,11 +139,30 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             {
                 return;
             }
+
+            PromptCapture? promptCapture = this._promptCapture;
+            if (promptCapture is not null)
+            {
+                promptCapture.Append(audioData);
+                return;
+            }
+
+            this._conversationProvider.AppendAudio(
+                this.ActiveCallContext,
+                this._activeTurnId,
+                audioData);
             Workflow<float[]> workflow = this._audioWorkflowPool.Get();
-            workflow.Initialize(this.DeviceContext, audioData);
+            workflow.Initialize(
+                this.ActiveCallContext,
+                audioData,
+                isFinal: false);
             try
             {
-                this.NextWriter.WriteAsync(workflow, this.HandlerToken);
+                this.NextWriter
+                    .WriteAsync(workflow, this.HandlerToken)
+                    .AsTask()
+                    .GetAwaiter()
+                    .GetResult();
             }
             catch (OperationCanceledException)
             {
@@ -128,7 +178,88 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
         public void OnProcessed(string sentence, bool isFirstSegment, bool isLastSegment, TtsGenerateResult ttsGenerateResult)
         {
+            PromptCapture? promptCapture = this._promptCapture;
+            if (promptCapture is not null)
+            {
+                if (ttsGenerateResult == TtsGenerateResult.Failed)
+                {
+                    promptCapture.Fail(new InvalidOperationException("TTS prompt synthesis failed."));
+                }
+                else if (isLastSegment)
+                {
+                    promptCapture.Complete();
+                }
+                return;
+            }
 
+            if (ttsGenerateResult == TtsGenerateResult.Failed)
+            {
+                _ = this._conversationProvider.FailAsync(
+                    this.ActiveCallContext,
+                    this._activeTurnId,
+                    "TTS synthesis failed.",
+                    CancellationToken.None);
+            }
+            else if (isLastSegment && ttsGenerateResult == TtsGenerateResult.Success)
+            {
+                Workflow<float[]> finalWorkflow = this._audioWorkflowPool.Get();
+                finalWorkflow.Initialize(
+                    this.ActiveCallContext,
+                    Array.Empty<float>(),
+                    isFinal: true);
+                try
+                {
+                    this.NextWriter
+                        .WriteAsync(finalWorkflow, this.HandlerToken)
+                        .AsTask()
+                        .GetAwaiter()
+                        .GetResult();
+                }
+                catch
+                {
+                    this._audioWorkflowPool.Return(finalWorkflow);
+                    _ = this._conversationProvider.MarkPlaybackEndedAsync(
+                        this.ActiveCallContext,
+                        this._activeTurnId,
+                        fullyPlayed: false,
+                        CancellationToken.None);
+                }
+
+                _ = this._conversationProvider.MarkSynthesisCompletedAsync(
+                    this.ActiveCallContext,
+                    this._activeTurnId,
+                    CancellationToken.None);
+            }
+        }
+
+        public async Task<float[]> SynthesizePromptAsync(
+            string text,
+            CancellationToken cancellationToken)
+        {
+            if (this._tts is null || string.IsNullOrWhiteSpace(text))
+            {
+                return [];
+            }
+
+            await this._synthesisLock.WaitAsync(cancellationToken);
+            PromptCapture capture = new();
+            this._promptCapture = capture;
+            try
+            {
+                OutSegment segment = new();
+                segment.Initialize(text, isFirst: true, isLast: true);
+                Workflow<OutSegment> workflow = new();
+                workflow.Initialize(this.ActiveCallContext, segment);
+                await this._tts.SynthesisAsync(workflow, cancellationToken);
+                return await capture.Completion.Task
+                    .WaitAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                this._promptCapture = null;
+                this._synthesisLock.Release();
+            }
         }
         public void OnSentenceStart(string sentence, string sentenceId)
         {
@@ -144,13 +275,43 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             if (this._tts is not null)
             {
                 this._tts.UnregisterDevice(this.DeviceContext.DeviceId);
-                if (!this._tts.IsSherpaModel)
-                {
-                    this._tts.Dispose();
-                }
             }
             this.NextWriter?.TryComplete();
+            this._synthesisLock.Dispose();
             base.Dispose();
+        }
+
+        private sealed class PromptCapture
+        {
+            private readonly object _sync = new();
+            private readonly List<float> _audio = [];
+
+            public TaskCompletionSource<float[]> Completion { get; } = new(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public void Append(ReadOnlySpan<float> audio)
+            {
+                lock (this._sync)
+                {
+                    for (int index = 0; index < audio.Length; index++)
+                    {
+                        this._audio.Add(audio[index]);
+                    }
+                }
+            }
+
+            public void Complete()
+            {
+                lock (this._sync)
+                {
+                    this.Completion.TrySetResult(this._audio.ToArray());
+                }
+            }
+
+            public void Fail(Exception exception)
+            {
+                this.Completion.TrySetException(exception);
+            }
         }
     }
 }

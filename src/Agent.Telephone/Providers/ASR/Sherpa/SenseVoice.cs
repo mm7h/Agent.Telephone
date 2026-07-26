@@ -24,7 +24,7 @@ namespace Agent.Telephone.Providers.ASR.Sherpa
                     return false;
                 }
                 OfflineRecognizerConfig offlineRecognizerConfig = new OfflineRecognizerConfig();
-                offlineRecognizerConfig.ModelConfig.SenseVoice.Model = Path.Combine(ModelFileFoler, "model.onnx");
+                offlineRecognizerConfig.ModelConfig.SenseVoice.Model = Path.Combine(this.ModelFileFoler, "model.onnx");
                 offlineRecognizerConfig.ModelConfig.SenseVoice.UseInverseTextNormalization = modelSetting.Config.GetConfigValueOrDefault("UseInverseTextNormalization", 1);
 
                 this.Build(offlineRecognizerConfig, modelSetting);

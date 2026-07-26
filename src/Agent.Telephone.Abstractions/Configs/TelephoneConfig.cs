@@ -8,6 +8,8 @@
             this.ModelConfig = default!;
             this.AssistantConfigs = [];
             this.LogSetting = new();
+            this.PromptMediaConfig = new();
+            this.MessageStoreConfig = new();
         }
 
         public bool AuthEnabled { get; set; }
@@ -15,6 +17,8 @@
         public SIPConfig SIPConfig { get; set; }
         public List<AssistantConfig> AssistantConfigs { get; set; }
         public ModelConfig ModelConfig { get; set; }
+        public PromptMediaConfig PromptMediaConfig { get; set; }
+        public MessageStoreConfig MessageStoreConfig { get; set; }
     }
 
     #region Log

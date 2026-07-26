@@ -1,6 +1,7 @@
 ﻿using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Helpers;
+using Agent.Telephone.Resources.Audio;
 using Microsoft.Extensions.Logging;
 using SIPSorcery.Media;
 using SIPSorceryMedia.Abstractions;
@@ -10,10 +11,13 @@ namespace Agent.Telephone.Providers.AudioProcessor
     internal class DefaultAudioProcessor : BaseProvider<DefaultAudioProcessor, ModelSetting>, IAudioProcessor
     {
         private readonly AudioEncoder _audioCodec;
+        private readonly FfmpegAudioPlayer _filePlayer;
 
-        public DefaultAudioProcessor(AudioEncoder audioCodec, ILogger<DefaultAudioProcessor> logger) : base(logger)
+        public DefaultAudioProcessor(AudioEncoder audioCodec,FfmpegAudioPlayer filePlayer,
+            ILogger<DefaultAudioProcessor> logger) : base(logger)
         {
             this._audioCodec = audioCodec;
+            this._filePlayer = filePlayer;
         }
 
         public override string ModelName => nameof(DefaultAudioProcessor);
@@ -53,6 +57,16 @@ namespace Agent.Telephone.Providers.AudioProcessor
             byte[] rtpPacket = this._audioCodec.EncodeAudio(resampled, format);
 
             return Task.FromResult(rtpPacket);
+        }
+
+        public Task<byte[]> DecodeFileToPcmWaveAsync(string? path, CancellationToken token = default)
+        {
+            return this._filePlayer.DecodeFileToPcmWaveAsync(path, token);
+        }
+
+        public Task<bool> PlayFileAsync(string? path, VoIPMediaSession mediaSession, AudioFormat audioFormat, CancellationToken token)
+        {
+            return this._filePlayer.PlayFileAsync(path, mediaSession, audioFormat, token);
         }
 
         public override void Dispose()

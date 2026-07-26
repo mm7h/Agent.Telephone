@@ -31,4 +31,8 @@
     <ProjectReference Include="..\Agent.Telephone.Abstractions\Agent.Telephone.Abstractions.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Agent.Telephone.Tests" />
+  </ItemGroup>
+
 </Project>

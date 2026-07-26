@@ -3,6 +3,7 @@ using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Helpers;
 using Agent.Telephone.Providers;
+using Agent.Telephone.Providers.Conversation;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
 using SIPSorceryMedia.Abstractions;
@@ -14,13 +15,16 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
     {
         private IAudioProcessor? _audioProcessor;
         private readonly ObjectPool<Workflow<float[]>> _audioWorkflowPool;
+        private readonly ConversationProvider _conversationProvider;
 
         public AudioSendHandler(
             ObjectPool<Workflow<float[]>> audioWorkflowPool,
+            ConversationProvider conversationProvider,
             TelephoneConfig config,
             ILogger<AudioSendHandler> logger) : base(config, logger)
         {
             this._audioWorkflowPool = audioWorkflowPool;
+            this._conversationProvider = conversationProvider;
         }
 
         public override string HandlerName => HandlerNames.AudioSendHandlerName;
@@ -69,17 +73,19 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             if (this._audioProcessor is null)
             { 
                 this.Logger.LogError("音频处理器未为设备配置: {deviceId}。", this.DeviceContext.DeviceId);
+                await this.MarkFinalPlaybackAsync(workflow, fullyPlayed: false);
                 return;
             }
 
             if (this.DeviceContext.ActiveCall is null)
             {
                 this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法发送音频。", this.DeviceContext.DeviceId);
+                await this.MarkFinalPlaybackAsync(workflow, fullyPlayed: false);
                 return;
             }
 
-            AudioFormat audioFormat = this.DeviceContext.ActiveCall.NegotiatedAudioFormat;
-            int packetTimeMs = this.DeviceContext.ActiveCall.PacketTimeMs;
+            AudioFormat audioFormat = this.ActiveCallContext.NegotiatedAudioFormat;
+            int packetTimeMs = this.ActiveCallContext.PacketTimeMs;
             int inputSamplesPerPacket = AudioProcessSettings.ModelToInputSampleRate * packetTimeMs / 1000;
             int durationRtpUnits = audioFormat.ClockRate * packetTimeMs / 1000;
 
@@ -91,6 +97,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 || audioFormat.ClockRate * packetTimeMs % 1000 != 0)
             {
                 this.Logger.LogWarning("设备 {deviceId} 的 RTP 音频包参数无效。", this.DeviceContext.DeviceId);
+                await this.MarkFinalPlaybackAsync(workflow, fullyPlayed: false);
                 return;
             }
 
@@ -102,21 +109,63 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 int analyzedIndex = 0;
                 while (samples.GetSlidingFrame(inputSamplesPerPacket, ref analyzedIndex, out float[] frame))
                 {
+                    if (this.ActiveCallContext.IsAgentMediaPaused)
+                    {
+                        this.DeviceContext.AudioOutputPacket.Reset();
+                        await this.MarkFinalPlaybackAsync(workflow, fullyPlayed: false);
+                        return;
+                    }
+
                     byte[] encoded = await this._audioProcessor.EncodeAsync(frame, audioFormat, this.HandlerToken);
-                    this.DeviceContext.ActiveCall.VoIPRTP.SendAudio((uint)durationRtpUnits, encoded);
+                    this.ActiveCallContext.VoIPRTP.SendAudio((uint)durationRtpUnits, encoded);
                     this.DeviceContext.AudioOutputPacket.PopFrames(inputSamplesPerPacket);
 
                     await Task.Delay(packetTimeMs, this.HandlerToken);
                 }
+
+                if (workflow.IsFinal)
+                {
+                    float[] remaining = this.DeviceContext.AudioOutputPacket.GetAllAudio();
+                    if (remaining.Length > 0)
+                    {
+                        float[] padded = new float[inputSamplesPerPacket];
+                        remaining.AsSpan().CopyTo(padded);
+                        byte[] encoded = await this._audioProcessor.EncodeAsync(
+                            padded,
+                            audioFormat,
+                            this.HandlerToken);
+                        this.ActiveCallContext.VoIPRTP.SendAudio(
+                            (uint)durationRtpUnits,
+                            encoded);
+                        this.DeviceContext.AudioOutputPacket.Reset();
+                    }
+
+                    await this.MarkFinalPlaybackAsync(workflow, fullyPlayed: true);
+                }
             }
             catch (OperationCanceledException)
             {
+                await this.MarkFinalPlaybackAsync(workflow, fullyPlayed: false);
                 this.Logger.LogDebug("音频发送已取消，设备 {deviceId}。", this.DeviceContext.DeviceId);
             }
             catch (Exception exception)
             {
+                await this.MarkFinalPlaybackAsync(workflow, fullyPlayed: false);
                 this.Logger.LogError(exception, "处理来自设备的音频发送数据包失败: {deviceId}。", this.DeviceContext.DeviceId);
             }
+        }
+
+        private Task MarkFinalPlaybackAsync(
+            Workflow<float[]> workflow,
+            bool fullyPlayed)
+        {
+            return workflow.IsFinal
+                ? this._conversationProvider.MarkPlaybackEndedAsync(
+                    this.ActiveCallContext,
+                    workflow.TurnId,
+                    fullyPlayed,
+                    CancellationToken.None)
+                : Task.CompletedTask;
         }
 
         protected override void OnHandlerTokenChanged()

@@ -1,4 +1,4 @@
-using Agent.Telephone.Abstractions.Configs;
+﻿using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Providers.VAD.Native;
 using Agent.Telephone.Resources.OnnxModels.VAD.Models;
 using Microsoft.Extensions.Logging;
@@ -30,7 +30,7 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
         private InferenceSession? _session;
         private bool _disposed;
 
-        private static readonly int[] SUPPORTED_SAMPLE_RATES = [8000, 16000];
+        private static readonly int[] s_sUPPORTED_SAMPLE_RATES = [8000, 16000];
 
         public SileroOnnx(ILogger<SileroOnnx> logger) : base(logger)
         {
@@ -101,13 +101,13 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
             }
 
             int stateSize = sampleRate == 16000 ? 64 : 128;
-            const int batchSize = 1;
+            const int BatchSize = 1;
 
             // Prepare input tensors
-            var inputTensor = new DenseTensor<float>(audioSamples, new int[] { batchSize, audioSamples.Length });
+            var inputTensor = new DenseTensor<float>(audioSamples, new int[] { BatchSize, audioSamples.Length });
             var srTensor = new DenseTensor<long>(new long[] { sampleRate }, new int[] { 1 });
-            var hTensor = new DenseTensor<float>(modelState.HiddenState, new int[] { 2, batchSize, stateSize });
-            var cTensor = new DenseTensor<float>(modelState.CellState, new int[] { 2, batchSize, stateSize });
+            var hTensor = new DenseTensor<float>(modelState.HiddenState, new int[] { 2, BatchSize, stateSize });
+            var cTensor = new DenseTensor<float>(modelState.CellState, new int[] { 2, BatchSize, stateSize });
 
             var inputs = new List<NamedOnnxValue>
             {
@@ -119,7 +119,7 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
 
             // Run inference (session.Run is thread-safe for reading, but we lock to be extra safe)
             IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs;
-            lock (_sessionLock)
+            lock (this._sessionLock)
             {
                 outputs = this._session.Run(inputs);
             }
@@ -132,14 +132,14 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
 
                 // Extract and update hidden state
                 var hnTensor = outputs.First(o => o.Name == "hn").AsTensor<float>();
-                float[] newHiddenState = new float[2 * batchSize * stateSize];
+                float[] newHiddenState = new float[2 * BatchSize * stateSize];
                 for (int i = 0; i < 2; i++)
                 {
-                    for (int j = 0; j < batchSize; j++)
+                    for (int j = 0; j < BatchSize; j++)
                     {
                         for (int k = 0; k < stateSize; k++)
                         {
-                            newHiddenState[i * batchSize * stateSize + j * stateSize + k] = hnTensor[i, j, k];
+                            newHiddenState[i * BatchSize * stateSize + j * stateSize + k] = hnTensor[i, j, k];
                         }
                     }
                 }
@@ -147,14 +147,14 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
 
                 // Extract and update cell state
                 var cnTensor = outputs.First(o => o.Name == "cn").AsTensor<float>();
-                float[] newCellState = new float[2 * batchSize * stateSize];
+                float[] newCellState = new float[2 * BatchSize * stateSize];
                 for (int i = 0; i < 2; i++)
                 {
-                    for (int j = 0; j < batchSize; j++)
+                    for (int j = 0; j < BatchSize; j++)
                     {
                         for (int k = 0; k < stateSize; k++)
                         {
-                            newCellState[i * batchSize * stateSize + j * stateSize + k] = cnTensor[i, j, k];
+                            newCellState[i * BatchSize * stateSize + j * stateSize + k] = cnTensor[i, j, k];
                         }
                     }
                 }
@@ -171,7 +171,7 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
                 throw new ArgumentException("音频样本为空。");
             }
 
-            if (!SUPPORTED_SAMPLE_RATES.Contains(sampleRate))
+            if (!s_sUPPORTED_SAMPLE_RATES.Contains(sampleRate))
             {
                 throw new ArgumentException(string.Format("不支持的采样率：{sampleRate}。仅支持 8000 和 16000。", sampleRate));
             }

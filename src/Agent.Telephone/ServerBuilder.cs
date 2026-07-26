@@ -1,21 +1,20 @@
 ﻿using Agent.Telephone.Abstractions;
 using Agent.Telephone.Abstractions.Configs;
+using Agent.Telephone.Abstractions.FunctionTools;
+using Agent.Telephone.Abstractions.Persistence;
 using Agent.Telephone.Abstractions.Store;
+using Agent.Telephone.Management;
+using Agent.Telephone.Providers.Conversation;
+using Agent.Telephone.Providers.Conversation.Persistence;
 using Agent.Telephone.Store;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using System;
-using System.Collections.Generic;
-using System.Data;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Agent.Telephone
 {
     internal class ServerBuilder : IServerBuilder
     {
-        private static readonly Lazy<IServerBuilder> lazyInstance = new Lazy<IServerBuilder>(() => new ServerBuilder());
+        private static readonly Lazy<IServerBuilder> s_lazyInstance = new Lazy<IServerBuilder>(() => new ServerBuilder());
 
         private ServerBuilder()
         {
@@ -26,7 +25,7 @@ namespace Agent.Telephone
             this.HostBuilder = hostBuilder;
         }
 
-        public static IServerBuilder CreateServerBuilder() => lazyInstance.Value;
+        public static IServerBuilder CreateServerBuilder() => s_lazyInstance.Value;
         public static IServerBuilder CreateServerBuilder(IHostBuilder hostBuilder) => new ServerBuilder(hostBuilder);
 
         public IHostBuilder HostBuilder { get; private set; }
@@ -42,10 +41,20 @@ namespace Agent.Telephone
             {
                 throw new ArgumentNullException(nameof(config), "TelephoneConfig cannot be null.");
             }
+            TelephoneConfigValidator.ValidateAndThrow(config);
+
             this.HostBuilder = this.HostBuilder.ConfigureServices((context, services) =>
             {
                 services.AddSingleton(config);
                 services.AddSingleton(connectionStore);
+                services.AddSingleton(config.MessageStoreConfig);
+                services.AddSingleton<IConversationStore, FileConversationStore>();
+                services.AddSingleton<ITurnStore, FileTurnStore>();
+                services.AddSingleton<IMessageStore, FileMessageStore>();
+                services.AddSingleton<IInterruptedTurnRecovery, FileInterruptedTurnRecovery>();
+                services.AddSingleton<InboundMessagePlayer>();
+                services.AddSingleton<IMessageDeliveryCoordinator, DeferredMessageDeliveryCoordinator>();
+                services.AddSingleton<ConversationProvider>();
 
             })
             .RegisterLogger(config)
@@ -53,6 +62,7 @@ namespace Agent.Telephone
             .RegisterDevices()
             .RegisterProviders(config)
             .RegisterHandlers()
+            .RegisterFunctionTools()
             .RegisterObjectPools()
             .RegisterProtocol(config);
 
@@ -75,11 +85,70 @@ namespace Agent.Telephone
             return this;
         }
 
+        public IServerBuilder WithFunctionTools<TFunctionTool>() where TFunctionTool : class, IFunctionTool, new()
+        {
+            this.HostBuilder.ConfigureServices((context, services) =>
+            {
+                services.AddSingleton<IFunctionTool, TFunctionTool>();
+            });
+
+            return this;
+        }
+
+        public IServerBuilder WithPrivateFunctionTools<TFunctionTool>() where TFunctionTool : class, IPrivateFunctionTool, new()
+        {
+            this.HostBuilder.ConfigureServices((context, services) =>
+            {
+                services.AddTransient<IPrivateFunctionTool, TFunctionTool>();
+            });
+
+            return this;
+        }
+
         public IHost Build()
         {
             IHost host = this.HostBuilder.Build();
-
+            this.BuildComponents(host.Services);
             return host;
+        }
+
+        private void BuildComponents(IServiceProvider serviceProvider)
+        {
+            ResourceManager resourceManager = serviceProvider.GetRequiredService<ResourceManager>();
+            ProviderManager providerManager = serviceProvider.GetRequiredService<ProviderManager>();
+            FunctionToolManager functionToolManager = serviceProvider.GetRequiredService<FunctionToolManager>();
+
+            bool loaded = resourceManager.BuildComponent();
+            if (!loaded)
+            {
+                Serilog.Log.CloseAndFlush();
+                throw new ApplicationException("加载资源组件失败。请检查配置和资源实现。");
+            }
+            bool builded = providerManager.BuildComponent();
+            if (!builded)
+            {
+                Serilog.Log.CloseAndFlush();
+                throw new ApplicationException("加载提供者组件失败。请检查配置和提供者实现。");
+            }
+            bool toolsLoaded = functionToolManager.BuildComponent();
+            if (!toolsLoaded)
+            {
+                Serilog.Log.CloseAndFlush();
+                throw new ApplicationException("加载自定义 function 组件失败。请检查配置和提供者实现。");
+            }
+
+            IInterruptedTurnRecovery recovery = serviceProvider.GetRequiredService<IInterruptedTurnRecovery>();
+            TelephoneConfig config = serviceProvider.GetRequiredService<TelephoneConfig>();
+            byte[] interruptionWave = providerManager
+                .DecodeAudioFileToPcmWaveAsync(config.PromptMediaConfig.TaskInterrupted)
+                .GetAwaiter()
+                .GetResult();
+            recovery.RecoverAsync(
+                "服务器重启，之前的任务已中断，请重新提交。",
+                interruptionWave).GetAwaiter().GetResult();
+
+            IMessageStore messageStore = serviceProvider.GetRequiredService<IMessageStore>();
+            messageStore.CleanupAsync(DateTimeOffset.UtcNow).GetAwaiter().GetResult();
         }
     }
 }

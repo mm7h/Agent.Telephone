@@ -2,6 +2,7 @@ using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Providers;
+using Agent.Telephone.Providers.Conversation;
 using Google.Protobuf.Reflection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
@@ -15,17 +16,21 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         private readonly ObjectPool<Workflow<string>> _textWorkflowPool;
         private readonly ObjectPool<Workflow<OutSegment>> _segmentWorkflowPool;
         private readonly ObjectPool<OutSegment> _segmentPool;
+        private readonly ConversationProvider _conversationProvider;
+        private long _activeTurnId;
 
         public DialogueHandler(
             ObjectPool<Workflow<string>> textWorkflowPool,
             ObjectPool<Workflow<OutSegment>> segmentWorkflowPool,
             ObjectPool<OutSegment> segmentPool,
+            ConversationProvider conversationProvider,
             TelephoneConfig config,
             ILogger<DialogueHandler> logger) : base(config, logger)
         {
             this._textWorkflowPool = textWorkflowPool;
             this._segmentWorkflowPool = segmentWorkflowPool;
             this._segmentPool = segmentPool;
+            this._conversationProvider = conversationProvider;
         }
 
         public override string HandlerName => HandlerNames.DialogueHandlerName;
@@ -51,7 +56,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             this._llm.OnTokenGenerating += this.OnTokenGenerating;
             this._llm.OnTokenGenerated += this.OnTokenGenerated;
 
-            this.RegisterCancellationToken(this.DeviceContext);
+            this.RegisterCancellationToken(this.DeviceContext, continueAfterCallEnded: true);
             return true;
         }
 
@@ -85,6 +90,10 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
             try
             {
+                this._activeTurnId = workflow.TurnId;
+                await this._conversationProvider
+                    .BeginAsync(this.ActiveCallContext, workflow.Data, this.HandlerToken)
+                    .ConfigureAwait(false);
                 await this._llm.StartDialogueAsync(workflow.Data, this.HandlerToken);
             }
             catch (OperationCanceledException)
@@ -93,6 +102,13 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             catch (Exception exception)
             {
+                await this._conversationProvider
+                    .FailAsync(
+                        this.ActiveCallContext,
+                        workflow.TurnId,
+                        exception.Message,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
                 this.Logger.LogError(exception, "处理来自设备的LLM对话失败: {deviceId}。", this.DeviceContext.DeviceId);
             }
         }
@@ -106,22 +122,25 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             {
                 return;
             }
-            if (this.DeviceContext.ActiveCall is null || this.HandlerToken.IsCancellationRequested)
-            {
-                return;
-            }
-
+            this._conversationProvider.AppendResponse(
+                this.ActiveCallContext,
+                this._activeTurnId,
+                segment.Content);
             OutSegment clonedSegment = this._segmentPool.Get();
             clonedSegment.Initialize(segment.Content, segment.IsFirstSegment, segment.IsLastSegment, segment.ParagraphId, segment.SentenceId);
 
             Workflow<OutSegment> workflow = this._segmentWorkflowPool.Get();
-            workflow.Initialize(this.DeviceContext, clonedSegment);
+            workflow.Initialize(this.ActiveCallContext, clonedSegment);
 
             // todo：检查状态，如果客户端是挂机状态，这时候就可以开始呼叫客户端了
 
             try
             {
-                this.NextWriter.WriteAsync(workflow, this.HandlerToken);
+                this.NextWriter
+                    .WriteAsync(workflow, this.HandlerToken)
+                    .AsTask()
+                    .GetAwaiter()
+                    .GetResult();
             }
             catch (OperationCanceledException)
             {
@@ -138,9 +157,18 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
         private void OnTokenGenerated(IEnumerable<OutSegment> segments)
         {
+            bool hasOutput = false;
             foreach (OutSegment segment in segments)
             {
+                hasOutput = true;
                 this._segmentPool.Return(segment);
+            }
+            if (!hasOutput)
+            {
+                _ = this._conversationProvider.CompleteWithoutAudioAsync(
+                    this.ActiveCallContext,
+                    this._activeTurnId,
+                    CancellationToken.None);
             }
 
             // todo：开始计时，如果超过30s没有接听，那么就取消呼叫
@@ -155,8 +183,6 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 this._llm.OnTokenGenerating -= this.OnTokenGenerating;
                 this._llm.OnTokenGenerated -= this.OnTokenGenerated;
                 this._llm.UnregisterDevice(this.DeviceContext.DeviceId);
-
-                this._llm.Dispose();
             }
             this.NextWriter?.TryComplete();
             base.Dispose();

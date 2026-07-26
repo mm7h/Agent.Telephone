@@ -9,9 +9,42 @@
   "SIPConfig": {
     "IP": "0.0.0.0",
     "Port": 5060,
-    "FFmpegPath": "./ffmpeg/"
+    "FFmpegPath": "./ffmpeg/",
+    "AgentInitializationTimeoutSeconds": 30,
+    "TransferTimeoutSeconds": 30,
+    "CallbackTimeoutSeconds": 30
+  },
+  "PromptMediaConfig": {
+    "AgentBusy": "",
+    "TransferWaiting": "",
+    "TransferFailed": "",
+    "TaskInterrupted": ""
+  },
+  "MessageStoreConfig": {
+    "RootPath": "./data/messages",
+    "RetentionDays": 30,
+    "MaxMessagesPerConversation": 100,
+    "RecentConversationTurns": 20
   },
   "AssistantConfigs": [
+    {
+      "DialingNumber": "10000",
+      "Name": "Operator",
+      "Prompt": "你是一名电话接线员，在确认用户意图后可以将电话转接到已注册的本地号码。",
+      "VAD": "SileroNative",
+      "ASR": "SenseVoice",
+      "Intent": "FunctionCall",
+      "LLM": "Chatglm",
+      "TTS": "HuoshanBidirection",
+      "Memory": "FlashMemory",
+      "AllowedTools": [
+        "TransferAsync"
+      ],
+      "Capabilities": [
+        "Chat",
+        "CallTransfer"
+      ]
+    },
     {
       "DialingNumber": "10086",
       "Name": "DefaultAssistant 1",
@@ -21,7 +54,11 @@
       "Intent": "IntentLlm",
       "LLM": "Chatglm",
       "TTS": "HuoshanBidirection",
-      "Memory": "FlashMemory"
+      "Memory": "FlashMemory",
+      "AllowedTools": [],
+      "Capabilities": [
+        "Chat"
+      ]
     },
     {
       "DialingNumber": "10085",
@@ -32,17 +69,18 @@
       "Intent": "IntentLlm",
       "LLM": "Chatglm",
       "TTS": "HuoshanBidirection",
-      "Memory": "FlashMemory"
+      "Memory": "FlashMemory",
+      "AllowedTools": [],
+      "Capabilities": [
+        "Chat"
+      ]
     }
   ],
   "ModelConfig": {
-    "SelectedSettings": {
+    "SelectedDefaultSettings": {
       "VAD": "SileroNative",
       "ASR": "SenseVoice",
-      "Intent": "IntentLlm",
-      "LLM": "Chatglm",
-      "TTS": "HuoshanBidirection",
-      "Memory": "FlashMemory"
+      "TTS": "HuoshanBidirection"
     },
     "ConfiguredSettings": {
       "VAD": {
@@ -173,7 +211,6 @@
       "Memory": {
         "FlashMemory": {}
       }
-    },
-    "McpSettings": {}
+    }
   }
 }
