@@ -1,10 +1,15 @@
-namespace Agent.Telephone.Abstractions.Configs
+﻿namespace Agent.Telephone.Abstractions.Configs
 {
     public sealed class PromptMediaConfig
     {
-        public string AgentBusy { get; set; } = string.Empty;
-        public string TransferWaiting { get; set; } = string.Empty;
-        public string TransferFailed { get; set; } = string.Empty;
-        public string TaskInterrupted { get; set; } = string.Empty;
+        public PromptMediaConfig()
+        {
+            this.Code = 0;
+            this.FilePath = string.Empty;
+        }
+
+        public int Code { get; set; }
+        public string FilePath { get; set; }
+        public string? Description { get; set; }
     }
 }

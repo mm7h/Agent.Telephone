@@ -137,15 +137,18 @@ namespace Agent.Telephone.Providers.TTS.Sherpa
                         string fileName = $"{this.ProviderType}_{segment.SentenceId}.{this.AudioSavingConfig.Format}";
                         string filePath = Path.Combine(this.AudioSavingConfig.SavePath, fileName);
                         if (File.Exists(filePath))
+                        {
+                            this.Logger.LogWarning("TTS 文件 {fileName} 已存在，将被覆盖。", fileName);
                             File.Delete(filePath);
+                        }
                         bool saved = await this._audioEditor.SaveAudioFileAsync(filePath, audio.Samples, this.GetTtsSampleRate(), 1, 128000);
                         if (saved)
                         {
-                            this.Logger.LogDebug("保存 TTS wav 文件 {fileName} 成功，文件时长为：{duration}s。", fileName, this.FormatDuration(duration));
+                            this.Logger.LogDebug("保存 TTS 文件 {fileName} 成功，文件时长为：{duration}s。", fileName, this.FormatDuration(duration));
                         }
                         else
                         {
-                            this.Logger.LogDebug("保存 TTS wav 文件 {fileName} 失败。", fileName);
+                            this.Logger.LogDebug("保存 TTS 文件 {fileName} 失败。", fileName);
                         }
                     }
                     else

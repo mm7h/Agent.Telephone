@@ -1,7 +1,14 @@
-﻿namespace Agent.Telephone.Resources
+﻿using Agent.Telephone.Abstractions.Configs;
+using SIPSorcery.Media;
+using SIPSorcery.SIP;
+using SIPSorceryMedia.Abstractions;
+
+namespace Agent.Telephone.Resources
 {
-    internal interface IAudioEditor
+    internal interface IAudioEditor : IResource<ModelSetting>
     {
+        event Action<uint, byte[], bool, bool>? OnAudioDataAvailable;
+
         /// <summary>
         /// Save float audio data to file with default settings (16kHz, mono, 128kbps)
         /// </summary>
@@ -35,5 +42,37 @@
         /// <param name="channels">Number of audio channels</param>
         /// <param name="bitRate">Bit rate for encoding</param>
         Task<bool> SaveAudioFileAsync(string filePath, byte[] pcmData, int sampleRate, int channels, int bitRate);
+        Task<bool> PlaySIPCodeAudioAsync(SIPResponseStatusCodesEnum sipCode, CancellationToken cancellationToken);
+        Task<bool> PlaySIPCodeAudioLoopAsync(SIPResponseStatusCodesEnum sipCode, CancellationToken cancellationToken);
+        Task<bool> PlayAudioFileAsync(string filePath, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Plays the cached audio for a SIP response code directly to the
+        /// negotiated media session (encoded to the call's audio format).
+        /// </summary>
+        Task<bool> PlaySIPCodeAudioAsync(
+            SIPResponseStatusCodesEnum sipCode,
+            VoIPMediaSession mediaSession,
+            AudioFormat audioFormat,
+            CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Loops the cached audio for a SIP response code to the negotiated
+        /// media session until the cancellation token is cancelled.
+        /// </summary>
+        Task<bool> PlaySIPCodeAudioLoopAsync(
+            SIPResponseStatusCodesEnum sipCode,
+            VoIPMediaSession mediaSession,
+            AudioFormat audioFormat,
+            CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Decodes a file and plays it directly to the negotiated media session.
+        /// </summary>
+        Task<bool> PlayFileAsync(
+            string? path,
+            VoIPMediaSession mediaSession,
+            AudioFormat audioFormat,
+            CancellationToken cancellationToken);
     }
 }

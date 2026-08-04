@@ -1,4 +1,4 @@
-using Agent.Telephone.Abstractions.Configs;
+﻿using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Helpers;
@@ -45,6 +45,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
 
             this._audioProcessor = privateProvider.AudioProcessor;
+            //this._audioProcessor.OnAudioDataAvailable
 
             this.RegisterCancellationToken(this.DeviceContext);
             return true;

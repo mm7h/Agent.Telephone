@@ -136,17 +136,7 @@ namespace Agent.Telephone
                 Serilog.Log.CloseAndFlush();
                 throw new ApplicationException("加载自定义 function 组件失败。请检查配置和提供者实现。");
             }
-
-            IInterruptedTurnRecovery recovery = serviceProvider.GetRequiredService<IInterruptedTurnRecovery>();
-            TelephoneConfig config = serviceProvider.GetRequiredService<TelephoneConfig>();
-            byte[] interruptionWave = providerManager
-                .DecodeAudioFileToPcmWaveAsync(config.PromptMediaConfig.TaskInterrupted)
-                .GetAwaiter()
-                .GetResult();
-            recovery.RecoverAsync(
-                "服务器重启，之前的任务已中断，请重新提交。",
-                interruptionWave).GetAwaiter().GetResult();
-
+            //todo
             IMessageStore messageStore = serviceProvider.GetRequiredService<IMessageStore>();
             messageStore.CleanupAsync(DateTimeOffset.UtcNow).GetAwaiter().GetResult();
         }

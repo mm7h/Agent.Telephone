@@ -9,6 +9,7 @@ using Agent.Telephone.Providers;
 using Agent.Telephone.Providers.ASR.Sherpa;
 using Agent.Telephone.Providers.AudioProcessor;
 using Agent.Telephone.Providers.CallControl;
+using Agent.Telephone.Providers.CallControl.Reservations;
 using Agent.Telephone.Providers.Conversation;
 using Agent.Telephone.Providers.LLM;
 using Agent.Telephone.Providers.LLM.Agents;
@@ -17,16 +18,13 @@ using Agent.Telephone.Providers.TTS.Huoshan;
 using Agent.Telephone.Providers.TTS.Sherpa;
 using Agent.Telephone.Providers.VAD.Native;
 using Agent.Telephone.Providers.VAD.Sherpa;
-using Agent.Telephone.Resources.Audio;
 using Flurl.Http.Configuration;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
-using SIPSorcery.Media;
 using SIPSorcery.SIP;
-using SIPSorceryMedia.Abstractions;
 
 namespace Agent.Telephone.Management
 {
@@ -48,7 +46,6 @@ namespace Agent.Telephone.Management
         {
             return builder.ConfigureServices((_, services) =>
             {
-                services.AddSingleton<CallControlProvider>();
                 RegisterAudioProcessor(services);
                 RegisterVad(services, config.ModelConfig, GlobalProviderNames.GLOBAL_VAD);
                 RegisterAsr(services, config.ModelConfig, GlobalProviderNames.GLOBAL_ASR);
@@ -63,9 +60,9 @@ namespace Agent.Telephone.Management
         {
             try
             {
-                CallControlProvider callControl =
-                    this.ServiceProvider.GetRequiredService<CallControlProvider>();
-                if (!callControl.Build(ModelSetting.Empty))
+                ICallControl callControl =
+                    this.ServiceProvider.GetRequiredService<ICallControl>();
+                if (!callControl.Build(this.Config.AssistantConfigs))
                 {
                     this.Logger.LogError("无法构建 {modelName} 提供程序。", callControl.ModelName);
                     return false;
@@ -110,52 +107,6 @@ namespace Agent.Telephone.Management
             {
                 this.Logger.LogError(ex, "构建提供程序组件失败。");
                 return false;
-            }
-        }
-
-        public async Task<byte[]> DecodeAudioFileToPcmWaveAsync(
-            string? path,
-            CancellationToken cancellationToken = default)
-        {
-            IAudioProcessor audioProcessor = this.ServiceProvider
-                .GetRequiredService<IAudioProcessor>();
-            try
-            {
-                if (!audioProcessor.Build(ModelSetting.Empty))
-                {
-                    return [];
-                }
-
-                return await audioProcessor
-                    .DecodeFileToPcmWaveAsync(path, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            finally
-            {
-                audioProcessor.Dispose();
-            }
-        }
-
-        public async Task<bool> PlayPromptAsync(
-            string? path,
-            VoIPMediaSession mediaSession,
-            AudioFormat audioFormat,
-            CancellationToken cancellationToken)
-        {
-            IAudioProcessor audioProcessor = this.ServiceProvider
-                .GetRequiredService<IAudioProcessor>();
-            try
-            {
-                return audioProcessor.Build(ModelSetting.Empty) &&
-                    await audioProcessor.PlayFileAsync(
-                        path,
-                        mediaSession,
-                        audioFormat,
-                        cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                audioProcessor.Dispose();
             }
         }
 
@@ -285,6 +236,9 @@ namespace Agent.Telephone.Management
                 pendingTts = null;
                 #endregion
 
+                providers.SetCallControl(
+                    this.ServiceProvider.GetRequiredService<ICallControl>());
+
                 return true;
             }
             catch (Exception exception)
@@ -357,8 +311,6 @@ namespace Agent.Telephone.Management
         #region AudioProcessor
         private static void RegisterAudioProcessor(IServiceCollection services)
         {
-            services.AddSingleton(_ => new AudioEncoder(SupportedAudioFormats.SupportedSDPAudioFormat));
-
             services.AddTransient<IAudioProcessor, DefaultAudioProcessor>();
         }
         #endregion
@@ -547,6 +499,17 @@ namespace Agent.Telephone.Management
 
         }
         #endregion
+
+        private static void RegisterCallControl(IServiceCollection services, ModelConfig config)
+        {
+            services.AddSingleton<TransferReservationRegistry>();
+            services.AddSingleton<ICallControl, AssistantRoleControl>();
+        }
+
+        private static void RegisterOfflineConversation(IServiceCollection services, ModelConfig config)
+        {
+
+        }
 
         #endregion
     }

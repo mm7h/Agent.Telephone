@@ -1,4 +1,4 @@
-using Agent.Telephone.Abstractions.Configs;
+﻿using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Enums;
 using Agent.Telephone.Helpers;
 using SIPSorcery.SIP;
@@ -245,28 +245,6 @@ namespace Agent.Telephone.Common.Contexts
             }
         }
 
-        public void MarkTransferDialing(ActiveCallContext activeCall)
-        {
-            lock (this._callSessionLock)
-            {
-                if (ReferenceEquals(this._activeCall, activeCall))
-                {
-                    this._callState = CallState.TransferDialing;
-                }
-            }
-        }
-
-        public void MarkBridged(ActiveCallContext activeCall)
-        {
-            lock (this._callSessionLock)
-            {
-                if (ReferenceEquals(this._activeCall, activeCall))
-                {
-                    this._callState = CallState.Bridged;
-                }
-            }
-        }
-
         public void MarkCallEnding(ActiveCallContext activeCall)
         {
             lock (this._callSessionLock)
@@ -283,6 +261,21 @@ namespace Agent.Telephone.Common.Contexts
             lock (this._callSessionLock)
             {
                 if (this._activeCall is not null || this._callbackActive)
+                {
+                    return false;
+                }
+
+                this._callbackActive = true;
+                this._callState = CallState.CallbackDialing;
+                return true;
+            }
+        }
+
+        public bool TryBeginCallback(ActiveCallContext activeCall)
+        {
+            lock (this._callSessionLock)
+            {
+                if (!ReferenceEquals(this._activeCall, activeCall) || this._callbackActive)
                 {
                     return false;
                 }

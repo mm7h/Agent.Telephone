@@ -1,21 +1,28 @@
-﻿using Agent.Telephone.Helper;
+﻿using Agent.Telephone.Abstractions.Configs;
+using Agent.Telephone.Helper;
+using Agent.Telephone.Resources.AudioFileCaching;
 using FFmpeg.AutoGen;
 using Microsoft.Extensions.Logging;
 
 namespace Agent.Telephone.Resources.FileEncoders
 {
-    internal class FFmpegFileEncoder : IAudioFileEncoder
+    internal class FFmpegFileEncoder : BaseResource<FFmpegFileEncoder, ModelSetting>, IAudioFileEncoder
     {
-        private readonly ILogger _logger;
-
-        public FFmpegFileEncoder(ILogger<FFmpegFileEncoder> logger)
+        public FFmpegFileEncoder(ILogger<FFmpegFileEncoder> logger) : base(logger)
         {
-            this._logger = logger;
+
+        }
+
+        public override string ResourceName => nameof(FFmpegFileEncoder);
+
+        public override bool Load(ModelSetting settings)
+        {
+            return true;
         }
 
         public Task<bool> EncodeAudioFileAsync(string outputPath, float[] audioData, int sampleRate, int channels, int bitRate = 128000)
         {
-            return Task.Run(() => EncodeAudioFile(outputPath, audioData, sampleRate, channels, bitRate));
+            return Task.Run(() => this.EncodeAudioFile(outputPath, audioData, sampleRate, channels, bitRate));
         }
 
         private unsafe bool EncodeAudioFile(string outputPath, float[] audioData, int sampleRate, int channels, int bitRate)
@@ -28,8 +35,8 @@ namespace Agent.Telephone.Resources.FileEncoders
             try
             {
                 string extension = Path.GetExtension(outputPath).ToLowerInvariant();
-                string formatName = GetFormatName(extension);
-                AVCodecID codecId = GetCodecId(extension);
+                string formatName = this.GetFormatName(extension);
+                AVCodecID codecId = this.GetCodecId(extension);
 
                 int ret = ffmpeg.avformat_alloc_output_context2(&formatContext, null, formatName, outputPath);
                 if (ret < 0)
@@ -198,13 +205,13 @@ namespace Agent.Telephone.Resources.FileEncoders
                         throw new InvalidOperationException($"avcodec_send_frame failed: {ret.FFErrorToText()}");
                     }
 
-                    ReceiveAndWritePackets(codecContext, formatContext, stream);
+                    this.ReceiveAndWritePackets(codecContext, formatContext, stream);
 
                     processedSamples += currentFrameSize;
                 }
 
                 ffmpeg.avcodec_send_frame(codecContext, null);
-                ReceiveAndWritePackets(codecContext, formatContext, stream);
+                this.ReceiveAndWritePackets(codecContext, formatContext, stream);
 
                 ffmpeg.av_write_trailer(formatContext);
 
@@ -304,6 +311,11 @@ namespace Agent.Telephone.Resources.FileEncoders
                 ".pcm" => AVCodecID.AV_CODEC_ID_PCM_S16LE,
                 _ => AVCodecID.AV_CODEC_ID_MP3
             };
+        }
+
+        public override void Dispose()
+        {
+
         }
     }
 }

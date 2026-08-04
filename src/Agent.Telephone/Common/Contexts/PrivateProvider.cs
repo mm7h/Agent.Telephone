@@ -1,6 +1,5 @@
 ﻿using Agent.Telephone.FunctionTools;
 using Agent.Telephone.Providers;
-using Agent.Telephone.Providers.CallControl;
 using Agent.Telephone.Providers.LLM.Contexts;
 using Microsoft.Extensions.AI;
 
@@ -27,21 +26,20 @@ namespace Agent.Telephone.Common.Contexts
         public IAsr? Asr { get; private set; }
         public ILlm? Llm { get; private set; }
         public ITts? Tts { get; private set; }
-        public ICallTransferExecutor? CallTransferExecutor { get; private set; }
+        public ICallControl? CallControl { get; private set; }
 
         public void SetAudioProcessor(IAudioProcessor value) => this.AudioProcessor = value;
         public void SetVad(IVad value) => this.Vad = value;
         public void SetAsr(IAsr value) => this.Asr = value;
         public void SetLlm(ILlm value) => this.Llm = value;
         public void SetTts(ITts value) => this.Tts = value;
-        public void SetCallTransferExecutor(ICallTransferExecutor value) =>
-            this.CallTransferExecutor = value;
+        public void SetCallControl(ICallControl value) => this.CallControl = value;
 
-        public void ClearCallTransferExecutor(ICallTransferExecutor value)
+        public void ClearCallControl(ICallControl value)
         {
-            if (ReferenceEquals(this.CallTransferExecutor, value))
+            if (ReferenceEquals(this.CallControl, value))
             {
-                this.CallTransferExecutor = null;
+                this.CallControl = null;
             }
         }
         public List<PrivateFunctionTool> PrivateFunctionTools => this._privateFunctionTools;
@@ -85,10 +83,10 @@ namespace Agent.Telephone.Common.Contexts
             }
             this.AudioProcessor?.Dispose();
             this.Llm?.Dispose();
+            this.CallControl?.Dispose();
             this.FunctionTools.Clear();
             this._functionToolRegistrations.Clear();
             this._privateFunctionTools.Clear();
-            this.CallTransferExecutor = null;
         }
     }
 }

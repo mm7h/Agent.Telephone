@@ -48,7 +48,7 @@ namespace Agent.Telephone.Management
             return builder.ConfigureServices((context, services) =>
             {
                 services.AddSingleton<FunctionToolManager>();
-                services.AddTransient<IPrivateFunctionTool, CallTransferFunctionTool>();
+                services.AddTransient<IPrivateFunctionTool, AssistantSwitchFunctionTool>();
             });
         }
 
@@ -119,12 +119,10 @@ namespace Agent.Telephone.Management
             SIPTransport sipTransport,
             SIPRequest sipRequest)
         {
-            return this.BuildForActiveCallAsync(deviceContext, sipTransport);
+            return this.BuildForActiveCallAsync(deviceContext);
         }
 
-        public async Task<bool> BuildForActiveCallAsync(
-            DeviceContext deviceContext,
-            SIPTransport sipTransport)
+        public async Task<bool> BuildForActiveCallAsync(DeviceContext deviceContext)
         {
             if (!this._hasFunctionTools)
             {
@@ -144,30 +142,19 @@ namespace Agent.Telephone.Management
                     continue;
                 }
 
-                foreach (FunctionToolMethodMetadata methodMeta in methodMetas)
+                foreach (FunctionToolMethodMetadata methodMeta in methodMetas.Where(method => this.IsAllowed(activeCall.AssistantConfig, instance.GetType(), method)))
                 {
-                    if (!this.IsAllowed(activeCall.AssistantConfig, instance.GetType(), methodMeta))
-                    {
-                        continue;
-                    }
-
                     FunctionToolRegistration registration = this.BuildRegistration(instance, methodMeta);
                     activeCall.AIAgentContext.PrivateProvider.AddFunctionToolRegistration(registration);
                 }
             }
 
             Dictionary<Type, IPrivateFunctionTool> privateFunctionTools = this.ServiceProvider.GetServices<IPrivateFunctionTool>().ToDictionary(i => i.GetType());
-            CallControlAdapter? callControl = null;
             bool initializedToolsOwned = false;
             List<PrivateFunctionTool> initializedTools = [];
             try
             {
                 activeCall.CallToken.ThrowIfCancellationRequested();
-                CallControlProvider callControlProvider = this.ServiceProvider
-                    .GetRequiredService<CallControlProvider>();
-                callControl = new CallControlAdapter(
-                    activeCall,
-                    callControlProvider);
 
                 foreach (var item in privateFunctionTools)
                 {
@@ -184,10 +171,7 @@ namespace Agent.Telephone.Management
                     }
 
                     FunctionToolMethodMetadata[] allowedMethods = methodMetas
-                        .Where(method => this.IsAllowed(
-                            activeCall.AssistantConfig,
-                            item.Key,
-                            method))
+                        .Where(method => this.IsAllowed(activeCall.AssistantConfig, item.Key, method))
                         .ToArray();
                     if (allowedMethods.Length == 0)
                     {
@@ -197,7 +181,7 @@ namespace Agent.Telephone.Management
                     instance.Logger = this._loggerFactory.CreateLogger(instance.GetType());
                     instance.ServerInfo = this.CreateServerInfoAdapter();
                     instance.DeviceContext = new SessionContextAdapter(deviceContext);
-                    instance.CallControl = callControl;
+                    instance.CallControl = new AssistantControlAdapter(activeCall, activeCall.AIAgentContext.PrivateProvider.CallControl!);
 
                     initializedTools.Add(instance);
                     await instance.OnFunctionToolInitializedAsync().ConfigureAwait(false);
@@ -212,7 +196,7 @@ namespace Agent.Telephone.Management
                     }
                 }
 
-                activeCall.RegisterOwnedResource(
+                activeCall.AIAgentContext.RegisterOwnedResource(
                     new PrivateFunctionToolLifetime(initializedTools, this.Logger));
                 initializedToolsOwned = true;
                 return true;
@@ -223,7 +207,8 @@ namespace Agent.Telephone.Management
                 {
                     try
                     {
-                        await ReleasePrivateToolsAsync(initializedTools).ConfigureAwait(false);
+                        await FunctionToolManager.ReleasePrivateToolsAsync(initializedTools)
+                            .ConfigureAwait(false);
                     }
                     catch (Exception releaseException)
                     {
@@ -256,6 +241,13 @@ namespace Agent.Telephone.Management
                     }
                 }
             }
+        }
+
+        public Task<bool> BuildForActiveCallAsync(
+            DeviceContext deviceContext,
+            SIPTransport sipTransport)
+        {
+            return this.BuildForActiveCallAsync(deviceContext);
         }
 
 
@@ -463,7 +455,7 @@ namespace Agent.Telephone.Management
 
                 try
                 {
-                    ReleasePrivateToolsAsync(tools).GetAwaiter().GetResult();
+                    FunctionToolManager.ReleasePrivateToolsAsync(tools).GetAwaiter().GetResult();
                 }
                 catch (Exception exception)
                 {

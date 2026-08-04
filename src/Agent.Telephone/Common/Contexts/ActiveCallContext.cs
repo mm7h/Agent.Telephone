@@ -11,22 +11,23 @@ namespace Agent.Telephone.Common.Contexts
 {
     internal sealed class ActiveCallContext : IDisposable
     {
-        private readonly DeviceContext _deviceContext;
         private readonly string _userAor;
         private readonly CancellationTokenSource _callCts = new();
         private readonly object _turnLock = new();
         private readonly object _lifetimeLock = new();
-        private readonly List<IDisposable> _ownedResources = [];
+        private readonly object _agentSessionLock = new();
+        private readonly List<IDisposable> _callOwnedResources = [];
         private CancellationTokenSource _turnCts;
         private long _turnId;
         private int _useCount;
         private bool _disposeRequested;
         private bool _callEnded;
+        private bool _assistantSwitching;
         private int _agentMediaPaused;
 
         public ActiveCallContext(SIPTransport sipTransport, SIPRequest sipRequest, DeviceContext deviceContext)
         {
-            this._deviceContext = deviceContext;
+            this.DeviceContext = deviceContext;
             this._userAor = deviceContext.Registration?.Aor.ToString()
                 ?? throw new InvalidOperationException("The device has no active registration.");
             this.CallId = Guid.NewGuid().ToString("N");
@@ -47,7 +48,7 @@ namespace Agent.Telephone.Common.Contexts
             SIPUserAgent userAgent,
             VoIPMediaSession mediaSession)
         {
-            this._deviceContext = deviceContext;
+            this.DeviceContext = deviceContext;
             this._userAor = userAor;
             this.CallId = Guid.NewGuid().ToString("N");
             this.DeviceId = deviceContext.DeviceId;
@@ -60,6 +61,7 @@ namespace Agent.Telephone.Common.Contexts
             this.DialedNumber = assistantNumber;
             this.CreateAIAgentContext();
         }
+        public DeviceContext DeviceContext { get;}
         public string CallId { get; }
         public string DeviceId { get; }
         public string UserAor => this._userAor;
@@ -76,20 +78,26 @@ namespace Agent.Telephone.Common.Contexts
         public CancellationToken CallToken => this._callCts.Token;
         public CancellationToken Token => this._turnCts.Token;
         public bool IsAgentMediaPaused => Volatile.Read(ref this._agentMediaPaused) != 0;
+        public bool IsAgentSwitching
+        {
+            get
+            {
+                lock (this._agentSessionLock)
+                {
+                    return this._assistantSwitching;
+                }
+            }
+        }
         public event Action<CancellationToken>? TurnTokenChanged;
 
         public void Cancel() => this._callCts.Cancel();
 
         public void PauseAgentMedia() => Interlocked.Exchange(ref this._agentMediaPaused, 1);
         public void ResumeAgentMedia() => Interlocked.Exchange(ref this._agentMediaPaused, 0);
-        public void MarkTransferDialing() =>
-            this._deviceContext.MarkTransferDialing(this);
-        public void MarkBridged() =>
-            this._deviceContext.MarkBridged(this);
         public void MarkPlayingPrompt() =>
-            this._deviceContext.MarkPlayingPrompt(this);
+            this.DeviceContext.MarkPlayingPrompt(this);
         public void MarkEnding() =>
-            this._deviceContext.MarkCallEnding(this);
+            this.DeviceContext.MarkCallEnding(this);
 
         public bool TryAcquireUse(out IDisposable? lease)
         {
@@ -107,7 +115,10 @@ namespace Agent.Telephone.Common.Contexts
             }
         }
 
-        public void RegisterOwnedResource(IDisposable resource)
+        /// <summary>
+        /// Registers a resource whose lifetime is the connected SIP call.
+        /// </summary>
+        public void RegisterCallOwnedResource(IDisposable resource)
         {
             ArgumentNullException.ThrowIfNull(resource);
 
@@ -118,7 +129,88 @@ namespace Agent.Telephone.Common.Contexts
                     throw new ObjectDisposedException(nameof(ActiveCallContext));
                 }
 
-                this._ownedResources.Add(resource);
+                this._callOwnedResources.Add(resource);
+            }
+        }
+
+        /// <summary>
+        /// Starts an exclusive Agent session switch for this connected call.
+        /// </summary>
+        public bool TryBeginAssistantSwitch()
+        {
+            lock (this._agentSessionLock)
+            {
+                if (this._assistantSwitching ||
+                    this._disposeRequested ||
+                    this._callEnded ||
+                    this._callCts.IsCancellationRequested)
+                {
+                    return false;
+                }
+
+                this._assistantSwitching = true;
+            }
+
+            this.PauseAgentMedia();
+            this.RestartTurn();
+            return true;
+        }
+
+        /// <summary>
+        /// Replaces the Agent resources while preserving the connected SIP call.
+        /// </summary>
+        public bool TryReplaceAssistantSession(string targetAssistantNumber)
+        {
+            if (string.IsNullOrWhiteSpace(targetAssistantNumber))
+            {
+                return false;
+            }
+
+            AssistantConfig? targetAssistant;
+            AIAgentContext currentAgent;
+            lock (this._agentSessionLock)
+            {
+                if (!this._assistantSwitching ||
+                    this._disposeRequested ||
+                    this._callEnded ||
+                    this._callCts.IsCancellationRequested ||
+                    !this.DeviceContext.AvailableAssistants.TryGetValue(
+                        targetAssistantNumber,
+                        out targetAssistant) ||
+                    targetAssistant is null)
+                {
+                    return false;
+                }
+
+                currentAgent = this.AIAgentContext;
+            }
+
+            currentAgent.Dispose();
+
+            lock (this._agentSessionLock)
+            {
+                if (this._disposeRequested ||
+                    this._callEnded ||
+                    this._callCts.IsCancellationRequested)
+                {
+                    return false;
+                }
+
+                this.DialedNumber = targetAssistantNumber;
+                this.AssistantConfig = targetAssistant;
+                this.AIAgentContext = new AIAgentContext(this);
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Ends an Agent session switch and permits normal Agent processing.
+        /// </summary>
+        public void CompleteAssistantSwitch()
+        {
+            lock (this._agentSessionLock)
+            {
+                this._assistantSwitching = false;
             }
         }
 
@@ -216,7 +308,7 @@ namespace Agent.Telephone.Common.Contexts
             {
                 throw new InvalidOperationException("呼叫号码不能为空");
             }
-            if (this._deviceContext.AvailableAssistants.TryGetValue(this.DialedNumber, out AssistantConfig? assistantConfig) && assistantConfig is not null)
+            if (this.DeviceContext.AvailableAssistants.TryGetValue(this.DialedNumber, out AssistantConfig? assistantConfig) && assistantConfig is not null)
             {
                 this.AssistantConfig = assistantConfig;
                 this.AIAgentContext = new AIAgentContext(this);
@@ -267,14 +359,25 @@ namespace Agent.Telephone.Common.Contexts
 
         private void DisposeCore()
         {
+            List<IDisposable> callOwnedResources;
             this.EndCallTransport();
             this._turnCts.Cancel();
-            for (int index = this._ownedResources.Count - 1; index >= 0; index--)
+            lock (this._lifetimeLock)
             {
-                this._ownedResources[index].Dispose();
+                callOwnedResources = [.. this._callOwnedResources];
+                this._callOwnedResources.Clear();
             }
-            this._ownedResources.Clear();
-            this.AIAgentContext.Dispose();
+            lock (this._agentSessionLock)
+            {
+                this._assistantSwitching = false;
+                this.AIAgentContext.Dispose();
+            }
+
+            for (int index = callOwnedResources.Count - 1; index >= 0; index--)
+            {
+                callOwnedResources[index].Dispose();
+            }
+
             this._turnCts.Dispose();
             this._callCts.Dispose();
         }

@@ -1,24 +1,27 @@
 ﻿using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Helpers;
-using Agent.Telephone.Resources.Audio;
+using Agent.Telephone.Resources;
 using Microsoft.Extensions.Logging;
 using SIPSorcery.Media;
 using SIPSorceryMedia.Abstractions;
+using ISIPSorceryAudioCodec = SIPSorcery.Media.AudioEncoder;
 
 namespace Agent.Telephone.Providers.AudioProcessor
 {
     internal class DefaultAudioProcessor : BaseProvider<DefaultAudioProcessor, ModelSetting>, IAudioProcessor
     {
-        private readonly AudioEncoder _audioCodec;
-        private readonly FfmpegAudioPlayer _filePlayer;
+        private readonly ISIPSorceryAudioCodec _audioCodec;
+        private readonly IAudioEditor _audioEditor;
 
-        public DefaultAudioProcessor(AudioEncoder audioCodec,FfmpegAudioPlayer filePlayer,
+        public DefaultAudioProcessor(ISIPSorceryAudioCodec audioCodec, IAudioEditor audioEditor,
             ILogger<DefaultAudioProcessor> logger) : base(logger)
         {
             this._audioCodec = audioCodec;
-            this._filePlayer = filePlayer;
+            this._audioEditor = audioEditor;
         }
+
+        public event Action<uint, byte[], bool, bool>? OnAudioDataAvailable;
 
         public override string ModelName => nameof(DefaultAudioProcessor);
         public override string ProviderType => "audio processor";
@@ -27,6 +30,7 @@ namespace Agent.Telephone.Providers.AudioProcessor
 
         public override bool Build(ModelSetting modelSetting)
         {
+            this._audioEditor.OnAudioDataAvailable += this.FireOnAudioDataAvailable;
             return true;
         }
 
@@ -59,19 +63,23 @@ namespace Agent.Telephone.Providers.AudioProcessor
             return Task.FromResult(rtpPacket);
         }
 
-        public Task<byte[]> DecodeFileToPcmWaveAsync(string? path, CancellationToken token = default)
-        {
-            return this._filePlayer.DecodeFileToPcmWaveAsync(path, token);
-        }
-
         public Task<bool> PlayFileAsync(string? path, VoIPMediaSession mediaSession, AudioFormat audioFormat, CancellationToken token)
         {
-            return this._filePlayer.PlayFileAsync(path, mediaSession, audioFormat, token);
+            return this._audioEditor.PlayFileAsync(path, mediaSession, audioFormat, token);
+        }
+
+        private void FireOnAudioDataAvailable(
+            uint sampleRate,
+            byte[] data,
+            bool isFirst,
+            bool isLast)
+        {
+            this.OnAudioDataAvailable?.Invoke(sampleRate, data, isFirst, isLast);
         }
 
         public override void Dispose()
         {
-            this._audioCodec.Dispose();
+            this._audioEditor.OnAudioDataAvailable -= this.FireOnAudioDataAvailable;
         }
 
 

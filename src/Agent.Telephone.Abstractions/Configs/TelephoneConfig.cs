@@ -8,7 +8,7 @@
             this.ModelConfig = default!;
             this.AssistantConfigs = [];
             this.LogSetting = new();
-            this.PromptMediaConfig = new();
+            this.PromptMediaConfigs = new Dictionary<int, string>();
             this.MessageStoreConfig = new();
         }
 
@@ -17,7 +17,7 @@
         public SIPConfig SIPConfig { get; set; }
         public List<AssistantConfig> AssistantConfigs { get; set; }
         public ModelConfig ModelConfig { get; set; }
-        public PromptMediaConfig PromptMediaConfig { get; set; }
+        public IDictionary<int, string> PromptMediaConfigs { get; set; }
         public MessageStoreConfig MessageStoreConfig { get; set; }
     }
 

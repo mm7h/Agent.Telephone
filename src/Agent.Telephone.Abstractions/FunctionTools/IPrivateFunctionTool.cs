@@ -9,7 +9,7 @@
         /// <summary>
         /// 当前通话的控制接口。
         /// </summary>
-        ICallControl CallControl { get; }
+        IAssistantControl CallControl { get; }
         /// <summary>
         /// 当设备连接时触发
         /// </summary>

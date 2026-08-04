@@ -1,6 +1,7 @@
 ﻿using Agent.Telephone.Abstractions.Configs;
+using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Resources;
-using Agent.Telephone.Resources.Audio;
+using Agent.Telephone.Resources.AudioFileCaching;
 using Agent.Telephone.Resources.Editors;
 using Agent.Telephone.Resources.FileEncoders;
 using Agent.Telephone.Resources.OnnxModels;
@@ -8,6 +9,7 @@ using Agent.Telephone.Resources.OnnxModels.VAD;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using SIPSorcery.Media;
 using SIPSorceryMedia.FFmpeg;
 
 namespace Agent.Telephone.Management
@@ -22,10 +24,13 @@ namespace Agent.Telephone.Management
             FFmpegInit.Initialise(FfmpegLogLevelEnum.AV_LOG_FATAL, config.SIPConfig.FFmpegPath);
             return builder.ConfigureServices((context, services) =>
             {
+                services.AddSingleton(_ => new AudioEncoder(SupportedAudioFormats.SupportedSDPAudioFormat));
+
+
                 services.AddSingleton<IVadOnnxModel, SileroOnnx>();
                 services.AddSingleton<IAudioFileEncoder, FFmpegFileEncoder>();
                 services.AddSingleton<IAudioEditor, AudioEditor>();
-                services.AddSingleton<FfmpegAudioPlayer>();
+                services.AddSingleton<IAudioFileCaching, DefaultAudioFileCaching>();
 
                 services.AddSingleton<ResourceManager>();
             });
@@ -41,11 +46,29 @@ namespace Agent.Telephone.Management
             }
             #endregion
 
-            FfmpegAudioPlayer filePlayer = this.ServiceProvider.GetRequiredService<FfmpegAudioPlayer>();
-            if (!filePlayer.Load(ModelSetting.Empty))
+            #region AudioFileEncoder
+            IAudioFileEncoder audioFileEncoder = this.ServiceProvider.GetRequiredService<IAudioFileEncoder>();
+            if (!audioFileEncoder.Load(ModelSetting.Empty))
             {
                 return false;
             }
+            #endregion
+
+            #region AudioEditor
+            IAudioEditor audioEditor = this.ServiceProvider.GetRequiredService<IAudioEditor>();
+            if (!audioEditor.Load(ModelSetting.Empty))
+            {
+                return false;
+            } 
+            #endregion
+
+            #region AudioFileCaching
+            IAudioFileCaching audioFileCaching = this.ServiceProvider.GetRequiredService<IAudioFileCaching>();
+            if (!audioFileCaching.Load(this.Config.PromptMediaConfigs))
+            {
+                return false;
+            }
+            #endregion
 
             return FFmpegInit.EnsureBinariesRegistered();
         }
@@ -68,7 +91,9 @@ namespace Agent.Telephone.Management
             IList<IDisposable> resources = new List<IDisposable>
             {
                 this.ServiceProvider.GetRequiredService<IVadOnnxModel>(),
-                this.ServiceProvider.GetRequiredService<FfmpegAudioPlayer>()
+                this.ServiceProvider.GetRequiredService<IAudioFileEncoder>(),
+                this.ServiceProvider.GetRequiredService<IAudioEditor>(),
+                this.ServiceProvider.GetRequiredService<IAudioFileCaching>()
             };
 
             foreach (IDisposable resource in resources)

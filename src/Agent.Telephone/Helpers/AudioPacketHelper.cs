@@ -51,7 +51,9 @@ namespace Agent.Telephone.Helpers
         public static float[] PcmShortToFloat(this short[] pcmShortBytes)
         {
             if (pcmShortBytes == null || pcmShortBytes.Length == 0)
+            {
                 return Array.Empty<float>();
+            }
 
             float[] pcmFloatBytes = new float[pcmShortBytes.Length];
             for (int i = 0; i < pcmShortBytes.Length; i++)
@@ -65,7 +67,9 @@ namespace Agent.Telephone.Helpers
         public static short[] PcmFloatToShort(this float[] pcmFloatBytes)
         {
             if (pcmFloatBytes == null || pcmFloatBytes.Length == 0)
+            {
                 return Array.Empty<short>();
+            }
 
             short[] pcmShortBytes = new short[pcmFloatBytes.Length];
             for (int i = 0; i < pcmFloatBytes.Length; i++)
@@ -85,7 +89,9 @@ namespace Agent.Telephone.Helpers
         public static float[] Pcm16BytesToFloat(this byte[] pcmBytes)
         {
             if (pcmBytes == null || pcmBytes.Length == 0)
+            {
                 return Array.Empty<float>();
+            }
 
             int sampleCount = pcmBytes.Length / 2;
             float[] floats = new float[sampleCount];
@@ -101,7 +107,9 @@ namespace Agent.Telephone.Helpers
         public static float[] PcmBytesToFloat(this byte[] pcmBytes, int bitDepth)
         {
             if (pcmBytes == null || pcmBytes.Length == 0)
+            {
                 return Array.Empty<float>();
+            }
 
             return bitDepth switch
             {
@@ -121,7 +129,9 @@ namespace Agent.Telephone.Helpers
                     int value = bytes[index] | (bytes[index + 1] << 8) | (bytes[index + 2] << 16);
                     // 24-bit有符号：如果最高位(第23位)为1，需要符号扩展
                     if ((value & 0x800000) != 0)
+                    {
                         value |= unchecked((int)0xFF000000);
+                    }
                     floats[i] = value / 8388608f; // 2^23
                 }
                 return floats;
@@ -143,9 +153,13 @@ namespace Agent.Telephone.Helpers
         public static byte[] Float2PcmBytes(this float[] audioData, int bitDepth = 16, int channels = 1)
         {
             if (audioData == null || audioData.Length == 0)
+            {
                 throw new ArgumentException(nameof(audioData));
+            }
             if (bitDepth is not (16 or 24 or 32))
+            {
                 throw new ArgumentException("仅支持 16位、24位和 32位 PCM 格式。");
+            }
 
             int sampleCount = audioData.Length / channels;
             int bytesPerSample = bitDepth / 8;

@@ -1,7 +1,9 @@
-namespace Agent.Telephone.Abstractions.Configs
+﻿namespace Agent.Telephone.Abstractions.Configs
 {
     public static class TelephoneConfigValidator
     {
+        private const int AssistantSwitchingRingbackCode = 180;
+
         private static readonly string[] ProviderKinds =
         [
             "VAD",
@@ -19,7 +21,7 @@ namespace Agent.Telephone.Abstractions.Configs
             var errors = new List<string>();
             ValidateSip(config.SIPConfig, errors);
             ValidateMessageStore(config.MessageStoreConfig, errors);
-            ValidatePromptMedia(config.PromptMediaConfig, errors);
+            ValidatePromptMedia(config.PromptMediaConfigs, config.AssistantConfigs, errors);
             ValidateAssistants(config.AssistantConfigs, config.ModelConfig, errors);
             return errors;
         }
@@ -81,7 +83,6 @@ namespace Agent.Telephone.Abstractions.Configs
                 config.AgentInitializationTimeoutSeconds,
                 "SIPConfig.AgentInitializationTimeoutSeconds",
                 errors);
-            ValidatePositive(config.TransferTimeoutSeconds, "SIPConfig.TransferTimeoutSeconds", errors);
             ValidatePositive(config.CallbackTimeoutSeconds, "SIPConfig.CallbackTimeoutSeconds", errors);
         }
 
@@ -125,19 +126,51 @@ namespace Agent.Telephone.Abstractions.Configs
         }
 
         private static void ValidatePromptMedia(
-            PromptMediaConfig? config,
+            IDictionary<int, string>? config,
+            IEnumerable<AssistantConfig>? assistants,
             ICollection<string> errors)
         {
             if (config is null)
             {
-                errors.Add("PromptMediaConfig is required.");
+                errors.Add("PromptMediaConfigs is required.");
                 return;
             }
 
-            ValidateOptionalFile(config.AgentBusy, "PromptMediaConfig.AgentBusy", errors);
-            ValidateOptionalFile(config.TransferWaiting, "PromptMediaConfig.TransferWaiting", errors);
-            ValidateOptionalFile(config.TransferFailed, "PromptMediaConfig.TransferFailed", errors);
-            ValidateOptionalFile(config.TaskInterrupted, "PromptMediaConfig.TaskInterrupted", errors);
+            foreach (KeyValuePair<int, string> entry in config)
+            {
+                if (entry.Key is < 100 or > 699)
+                {
+                    errors.Add(
+                        $"PromptMediaConfigs contains an invalid SIP response code '{entry.Key}'.");
+                    continue;
+                }
+
+                ValidateOptionalFile(
+                    entry.Value,
+                    $"PromptMediaConfigs[{entry.Key}]",
+                    errors);
+            }
+
+            if (UsesAssistantSwitching(assistants))
+            {
+                bool hasRingback = config.TryGetValue(
+                    AssistantSwitchingRingbackCode,
+                    out string? ringbackPath);
+                ValidateRequiredFile(
+                    hasRingback ? ringbackPath : null,
+                    $"PromptMediaConfigs[{AssistantSwitchingRingbackCode}] (AssistantSwitchingRingback)",
+                    errors);
+            }
+        }
+
+        private static bool UsesAssistantSwitching(IEnumerable<AssistantConfig>? assistants)
+        {
+            return assistants?.Any(assistant =>
+                assistant?.AllowedTools?.Any(allowedTool =>
+                    string.Equals(
+                        allowedTool?.Trim(),
+                        "SwitchAssistantAsync",
+                        StringComparison.OrdinalIgnoreCase)) == true) == true;
         }
 
         private static void ValidateAssistants(
@@ -252,6 +285,20 @@ namespace Agent.Telephone.Abstractions.Configs
             {
                 errors.Add($"{propertyName} contains an invalid file path.");
             }
+        }
+
+        private static void ValidateRequiredFile(
+            string? path,
+            string propertyName,
+            ICollection<string> errors)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                errors.Add($"{propertyName} is required when SwitchAssistantAsync is enabled.");
+                return;
+            }
+
+            ValidateOptionalFile(path, propertyName, errors);
         }
 
         private static void ValidatePositive(

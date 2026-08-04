@@ -1,4 +1,4 @@
-namespace Agent.Telephone.Abstractions.Configs
+﻿namespace Agent.Telephone.Abstractions.Configs
 {
     public class AssistantConfig
     {
@@ -14,7 +14,6 @@ namespace Agent.Telephone.Abstractions.Configs
             this.TTS = string.Empty;
             this.Memory = string.Empty;
             this.AllowedTools = [];
-            this.Capabilities = [];
         }
         public string DialingNumber { get; set; }
         public string Name { get; set; }
@@ -26,6 +25,5 @@ namespace Agent.Telephone.Abstractions.Configs
         public string TTS { get; set; }
         public string Memory { get; set; }
         public List<string> AllowedTools { get; set; }
-        public List<string> Capabilities { get; set; }
     }
 }

@@ -1,6 +1,6 @@
-using Agent.Telephone.Abstractions.Configs;
+﻿using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Abstractions.Store;
-using Agent.Telephone.Providers.CallControl;
+using Agent.Telephone.Providers.CallControl.Reservations;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Helpers;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,18 +15,18 @@ namespace Agent.Telephone.Management
     {
         private readonly IStore _connectionStore;
         private readonly object _deviceLock = new();
-        private readonly CallControlProvider _callControlProvider;
+        private readonly TransferReservationRegistry _reservations;
 
         public DeviceContextManager(
             IStore store,
             IServiceProvider serviceProvider,
-            CallControlProvider callControlProvider,
+            TransferReservationRegistry reservations,
             TelephoneConfig config,
             ILogger<DeviceContextManager> logger)
             : base(serviceProvider, config, logger)
         {
             this._connectionStore = store;
-            this._callControlProvider = callControlProvider;
+            this._reservations = reservations;
         }
 
         public static IHostBuilder RegisterServices(IHostBuilder builder)
@@ -148,7 +148,7 @@ namespace Agent.Telephone.Management
                     dialingNumber,
                     activeBinding.Contact.ToString());
                 if (device.IsCallOccupied ||
-                    !this._callControlProvider.TryAcquireTarget(
+                    !this._reservations.TryAcquire(
                         device.DeviceId,
                         endpoint,
                         out IRegisteredEndpointLease? lease))
@@ -210,7 +210,7 @@ namespace Agent.Telephone.Management
                 RegisteredEndpoint endpoint = new(
                     activeBinding.Aor.User,
                     activeBinding.Contact.ToString());
-                if (!this._callControlProvider.TryAcquireTarget(
+                if (!this._reservations.TryAcquire(
                     device.DeviceId,
                     endpoint,
                     out IRegisteredEndpointLease? lease,

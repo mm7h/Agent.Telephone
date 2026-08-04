@@ -10,7 +10,7 @@ namespace Agent.Telephone.FunctionTools
 
         public IDeviceContext DeviceContext { get; internal set; } = null!;
 
-        public ICallControl CallControl { get; internal set; } = null!;
+        public IAssistantControl CallControl { get; internal set; } = null!;
 
         public virtual ValueTask OnDeviceConnectedAsync()
         {

@@ -27,7 +27,7 @@ namespace Agent.Telephone.Handlers
         protected ActiveCallContext ActiveCallContext => this._activeCall
             ?? throw new InvalidOperationException("The handler has not been bound to an active call.");
 
-        protected void RegisterCancellationToken(DeviceContext deviceContext, bool continueAfterCallEnded = false)
+        public void RegisterCancellationToken(DeviceContext deviceContext, bool continueAfterCallEnded = false)
         {
             this.DeviceContext = deviceContext;
             ActiveCallContext? activeCall = deviceContext.ActiveCall;

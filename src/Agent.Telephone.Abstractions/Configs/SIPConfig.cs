@@ -7,7 +7,6 @@
         public string FFmpegPath { get; set; } = "./ffmpeg/";
         public int HangUpTimeoutSeconds { get; set; } = 30;
         public int AgentInitializationTimeoutSeconds { get; set; } = 30;
-        public int TransferTimeoutSeconds { get; set; } = 30;
         public int CallbackTimeoutSeconds { get; set; } = 30;
     }
 }

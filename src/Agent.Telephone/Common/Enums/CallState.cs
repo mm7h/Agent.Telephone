@@ -1,4 +1,4 @@
-namespace Agent.Telephone.Common.Enums
+﻿namespace Agent.Telephone.Common.Enums
 {
     internal enum CallState
     {
@@ -6,8 +6,6 @@ namespace Agent.Telephone.Common.Enums
         PreparingAgent,
         AgentConnected,
         PlayingPrompt,
-        TransferDialing,
-        Bridged,
         CallbackDialing,
         CallbackConnected,
         Ending,

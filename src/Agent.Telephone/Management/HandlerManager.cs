@@ -1,4 +1,4 @@
-using Agent.Telephone.Abstractions.Configs;
+﻿using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Handlers;
 using Agent.Telephone.Handlers.AIAdapterHandlers;
@@ -27,7 +27,6 @@ namespace Agent.Telephone.Management
             return builder.ConfigureServices((_, services) =>
             {
                 services.AddTransient<ActiveCallHandler>();
-                services.AddTransient<SIPCallControlHandler>();
                 services.AddTransient<RTPHandler>();
                 services.AddTransient<AudioReceivedHandler>();
                 services.AddTransient<Audio2TextHandler>();
@@ -64,8 +63,9 @@ namespace Agent.Telephone.Management
                 return false;
             }
 
-            var activeCall = this.ServiceProvider.GetRequiredService<ActiveCallHandler>();
-            var callControl = this.ServiceProvider.GetRequiredService<SIPCallControlHandler>();
+            ActiveCallHandler? activeCallHandler = answerRequest is null
+                ? null
+                : this.ServiceProvider.GetRequiredService<ActiveCallHandler>();
             var rtp = this.ServiceProvider.GetRequiredService<RTPHandler>();
             var audioReceived = this.ServiceProvider.GetRequiredService<AudioReceivedHandler>();
             var audio2Text = this.ServiceProvider.GetRequiredService<Audio2TextHandler>();
@@ -75,8 +75,6 @@ namespace Agent.Telephone.Management
 
             IDictionary<string, IHandler> handlerContainer = new Dictionary<string, IHandler>
             {
-                [activeCall.HandlerName] = activeCall,
-                [callControl.HandlerName] = callControl,
                 [rtp.HandlerName] = rtp,
                 [audioReceived.HandlerName] = audioReceived,
                 [audio2Text.HandlerName] = audio2Text,
@@ -88,6 +86,21 @@ namespace Agent.Telephone.Management
             HandlerResourcesLifetime? resources = null;
             try
             {
+                if (activeCallHandler is not null)
+                {
+                    this.InitializeDeviceContext(deviceContext, activeCallHandler);
+                    if (!activeCallHandler.Build())
+                    {
+                        this.Logger.LogError(
+                            "无法为设备 {deviceId} 构建活动通话 Handler。",
+                            deviceContext.DeviceId);
+                        activeCallHandler.Dispose();
+                        return false;
+                    }
+
+                    activeCallContext.RegisterCallOwnedResource(activeCallHandler);
+                }
+
                 foreach (IHandler handler in handlerContainer.Values)
                 {
                     this.InitializeDeviceContext(deviceContext, handler);
@@ -112,7 +125,7 @@ namespace Agent.Telephone.Management
                 resources = new HandlerResourcesLifetime(
                     handlerContainer.Values.ToArray(),
                     new HandlerPipelineLifetime(completeWriters, handlerTasks, this.Logger));
-                activeCallContext.RegisterOwnedResource(resources);
+                activeCallContext.AIAgentContext.RegisterOwnedResource(resources);
                 resources = null;
             }
             catch (Exception exception)
@@ -123,6 +136,7 @@ namespace Agent.Telephone.Management
                 }
                 else
                 {
+                    activeCallHandler?.Dispose();
                     foreach (IHandler handler in handlerContainer.Values)
                     {
                         handler.Dispose();
@@ -140,7 +154,7 @@ namespace Agent.Telephone.Management
                 return true;
             }
 
-            bool answered = await activeCall.AnswerAsync(answerRequest);
+            bool answered = await activeCallHandler!.AnswerAsync(answerRequest);
             if (answered)
             {
                 this.ServiceProvider

@@ -5,6 +5,7 @@ using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Helpers;
 using Agent.Telephone.Management;
 using Agent.Telephone.Providers.Conversation;
+using Agent.Telephone.Resources;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SIPSorcery.Net;
@@ -377,11 +378,16 @@ namespace Agent.Telephone.Protocol.Server.Middlewares
                 }
 
                 device.MarkPlayingPrompt(activeCall);
-                await this._providerManager.PlayPromptAsync(
-                    this._config.PromptMediaConfig.AgentBusy,
-                    activeCall.VoIPRTP,
-                    activeCall.NegotiatedAudioFormat,
-                    activeCall.CallToken).ConfigureAwait(false);
+                IAudioEditor? audioEditor = this._serviceProvider
+                    .GetService<IAudioEditor>();
+                if (audioEditor is not null)
+                {
+                    await audioEditor.PlaySIPCodeAudioAsync(
+                        SIPResponseStatusCodesEnum.BusyHere,
+                        activeCall.VoIPRTP,
+                        activeCall.NegotiatedAudioFormat,
+                        activeCall.CallToken).ConfigureAwait(false);
+                }
             }
             finally
             {

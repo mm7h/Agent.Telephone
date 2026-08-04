@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace Agent.Telephone.Providers.CallControl
+namespace Agent.Telephone.Providers.CallControl.Reservations
 {
     /// <summary>
     /// Ensures that a registered endpoint can be reserved by only one outbound

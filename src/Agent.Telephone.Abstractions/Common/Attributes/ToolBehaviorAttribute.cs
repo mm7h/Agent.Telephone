@@ -1,4 +1,4 @@
-using Agent.Telephone.Abstractions.Common.Enums;
+﻿using Agent.Telephone.Abstractions.Common.Enums;
 
 namespace Agent.Telephone.Abstractions.Common.Attributes
 {
@@ -14,7 +14,7 @@ namespace Agent.Telephone.Abstractions.Common.Attributes
 
         public ToolBehaviorAttribute(ToolAction defaultAction)
         {
-            DefaultAction = defaultAction;
+            this.DefaultAction = defaultAction;
         }
 
         /// <summary>

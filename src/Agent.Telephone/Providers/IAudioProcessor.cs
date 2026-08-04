@@ -6,9 +6,9 @@ namespace Agent.Telephone.Providers
 {
     internal interface IAudioProcessor : IProvider<ModelSetting>
     {
+        event Action<uint, byte[], bool, bool>? OnAudioDataAvailable;
         Task<float[]> DecodeAsync(byte[] encodedData, AudioFormat format, CancellationToken token); 
         Task<byte[]> EncodeAsync(float[] pcmData, AudioFormat format, CancellationToken token);
-        Task<byte[]> DecodeFileToPcmWaveAsync(string? path, CancellationToken token = default);
         Task<bool> PlayFileAsync(
             string? path,
             VoIPMediaSession mediaSession,

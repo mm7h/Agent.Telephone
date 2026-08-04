@@ -1,4 +1,4 @@
-namespace Agent.Telephone.Providers.CallControl
+namespace Agent.Telephone.Providers.CallControl.Reservations
 {
     internal enum RegisteredEndpointStatus
     {
