@@ -1,4 +1,5 @@
 ﻿using Agent.Telephone.Abstractions.Configs;
+using Agent.Telephone.Common.BuildConfigs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Resources;
 using Agent.Telephone.Resources.AudioFileCaching;
@@ -64,7 +65,9 @@ namespace Agent.Telephone.Management
 
             #region AudioFileCaching
             IAudioFileCaching audioFileCaching = this.ServiceProvider.GetRequiredService<IAudioFileCaching>();
-            if (!audioFileCaching.Load(this.Config.PromptMediaConfigs))
+
+            AudioFileCachingBuildConfig audioFileCachingBuildConfig = new (this.Config.PromptMediaPath, this.Config.PromptMediaConfigs);
+            if (!audioFileCaching.Load(audioFileCachingBuildConfig))
             {
                 return false;
             }

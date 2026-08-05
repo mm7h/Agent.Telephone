@@ -25,6 +25,7 @@ namespace Agent.Telephone.Handlers.SIPHandlers
             this._activeCall = activeCall;
             activeCall.UserAgent.OnCallHungup += this.OnCallHungup;
             activeCall.UserAgent.ServerCallCancelled += this.OnServerCallCancelled;
+            activeCall.UserAgent.OnDtmfTone += this.OnDtmfTone;
             return true;
         }
 
@@ -72,6 +73,12 @@ namespace Agent.Telephone.Handlers.SIPHandlers
             this.CloseActiveCallSession();
         }
 
+        private void OnDtmfTone(byte tone, int duration)
+        {
+            ActiveCallContext? activeCall = this._activeCall;
+            activeCall?.AIAgentContext.PrivateProvider.DtmfInput?.HandleDtmfTone(activeCall, tone);
+        }
+
         private void CloseActiveCallSession()
         {
             if (this._activeCall is not null)
@@ -86,6 +93,7 @@ namespace Agent.Telephone.Handlers.SIPHandlers
             {
                 this._activeCall.UserAgent.OnCallHungup -= this.OnCallHungup;
                 this._activeCall.UserAgent.ServerCallCancelled -= this.OnServerCallCancelled;
+                this._activeCall.UserAgent.OnDtmfTone -= this.OnDtmfTone;
             }
         }
     }

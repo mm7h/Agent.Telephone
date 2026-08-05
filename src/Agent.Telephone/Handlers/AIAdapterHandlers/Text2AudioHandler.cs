@@ -105,7 +105,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                             workflow.TurnId,
                             workflow.Data.SentenceId,
                             workflow.Data.IsLastSegment,
-                            this.HandlerToken).ConfigureAwait(false);
+                            this.HandlerToken);
                     }
                 }
                 finally
@@ -228,7 +228,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 await this._tts.SynthesisAsync(workflow, cancellationToken);
                 return await capture.Completion.Task
                     .WaitAsync(cancellationToken)
-                    .ConfigureAwait(false);
+                    ;
             }
             finally
             {

@@ -40,6 +40,24 @@ public sealed class AssistantSwitchResultTests
         Assert.Equal(ToolAction.Silent, response.Next);
     }
 
+    [Fact]
+    public async Task RequestDtmfInputAsync_DelegatesToCallControlAsync()
+    {
+        StubCallControl callControl = new();
+        DtmfInputFunctionTool tool = new()
+        {
+            CallControl = callControl,
+        };
+
+        FunctionReturn<DtmfInputResult> response = await tool.RequestDtmfInputAsync(
+            "请按一",
+            DtmfKey.One | DtmfKey.Pound);
+
+        Assert.Equal(DtmfKey.One | DtmfKey.Pound, callControl.RequestedDtmfKeys);
+        Assert.True(response.Result?.Succeeded);
+        Assert.Equal("请按一", response.Response);
+    }
+
     private sealed class StubCallControl : IAssistantControl
     {
         public string? CallerNumber => "10001";
@@ -50,6 +68,8 @@ public sealed class AssistantSwitchResultTests
 
         public string? TargetAssistantNumber { get; private set; }
 
+        public DtmfKey RequestedDtmfKeys { get; private set; }
+
         public Task<AssistantSwitchResult> SwitchAssistantAsync(
             string targetAssistantNumber,
             CancellationToken cancellationToken = default)
@@ -59,6 +79,14 @@ public sealed class AssistantSwitchResultTests
                 new AssistantSwitchResult(
                     AssistantSwitchStatus.Accepted,
                     targetAssistantNumber));
+        }
+
+        public Task<DtmfInputResult> RequestDtmfInputAsync(
+            DtmfKey keys,
+            CancellationToken cancellationToken = default)
+        {
+            this.RequestedDtmfKeys = keys;
+            return Task.FromResult(new DtmfInputResult(DtmfInputStatus.Accepted));
         }
     }
 }

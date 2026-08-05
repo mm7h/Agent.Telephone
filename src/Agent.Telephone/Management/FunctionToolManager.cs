@@ -49,6 +49,7 @@ namespace Agent.Telephone.Management
             {
                 services.AddSingleton<FunctionToolManager>();
                 services.AddTransient<IPrivateFunctionTool, AssistantSwitchFunctionTool>();
+                services.AddTransient<IPrivateFunctionTool, DtmfInputFunctionTool>();
             });
         }
 
@@ -181,12 +182,12 @@ namespace Agent.Telephone.Management
                     instance.Logger = this._loggerFactory.CreateLogger(instance.GetType());
                     instance.ServerInfo = this.CreateServerInfoAdapter();
                     instance.DeviceContext = new SessionContextAdapter(deviceContext);
-                    instance.CallControl = new AssistantControlAdapter(activeCall, activeCall.AIAgentContext.PrivateProvider.CallControl!);
+                    instance.CallControl = new AssistantControlAdapter(activeCall);
 
                     initializedTools.Add(instance);
-                    await instance.OnFunctionToolInitializedAsync().ConfigureAwait(false);
+                    await instance.OnFunctionToolInitializedAsync();
                     activeCall.CallToken.ThrowIfCancellationRequested();
-                    await instance.OnDeviceConnectedAsync().ConfigureAwait(false);
+                    await instance.OnDeviceConnectedAsync();
                     activeCall.CallToken.ThrowIfCancellationRequested();
 
                     foreach (FunctionToolMethodMetadata methodMeta in allowedMethods)
@@ -208,7 +209,7 @@ namespace Agent.Telephone.Management
                     try
                     {
                         await FunctionToolManager.ReleasePrivateToolsAsync(initializedTools)
-                            .ConfigureAwait(false);
+                            ;
                     }
                     catch (Exception releaseException)
                     {
@@ -324,10 +325,17 @@ namespace Agent.Telephone.Management
 
         private FunctionToolRegistration BuildRegistration(object instance, FunctionToolMethodMetadata methodMeta)
         {
+            DtmfKey dtmfKeys = methodMeta.Behavior?.DtmfKeys ?? DtmfKey.None;
+            string description = methodMeta.Description ?? methodMeta.FunctionName;
+            if (dtmfKeys != DtmfKey.None)
+            {
+                description = $"{description}。可由电话按键 {dtmfKeys} 选择。";
+            }
+
             AIFunction aiFunction = AIFunctionFactory.Create(methodMeta.Method, instance, new AIFunctionFactoryOptions
             {
                 Name = methodMeta.FunctionName,
-                Description = methodMeta.Description ?? methodMeta.FunctionName,
+                Description = description,
                 SerializerOptions = JsonHelper.OPTIONS
             });
 
@@ -336,7 +344,8 @@ namespace Agent.Telephone.Management
             return new FunctionToolRegistration(
                 aiFunction,
                 metadata,
-                methodMeta.Behavior?.DefaultAction ?? ToolAction.Continue);
+                methodMeta.Behavior?.DefaultAction ?? ToolAction.Continue,
+                dtmfKeys);
         }
 
         private bool IsAllowed(
@@ -396,7 +405,7 @@ namespace Agent.Telephone.Management
             {
                 try
                 {
-                    await tool.OnDeviceClosedAsync().ConfigureAwait(false);
+                    await tool.OnDeviceClosedAsync();
                 }
                 catch (Exception exception)
                 {
@@ -405,7 +414,7 @@ namespace Agent.Telephone.Management
 
                 try
                 {
-                    await tool.OnFunctionToolReleasedAsync().ConfigureAwait(false);
+                    await tool.OnFunctionToolReleasedAsync();
                 }
                 catch (Exception exception)
                 {

@@ -1,4 +1,5 @@
-﻿using Agent.Telephone.Abstractions.Common.Contexts;
+using Agent.Telephone.Abstractions.Common.Contexts;
+using Agent.Telephone.Abstractions.Common.Enums;
 
 namespace Agent.Telephone.Abstractions.FunctionTools
 {
@@ -19,5 +20,12 @@ namespace Agent.Telephone.Abstractions.FunctionTools
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>The result of accepting the assistant switch request.</returns>
         Task<AssistantSwitchResult> SwitchAssistantAsync(string targetAssistantNumber, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Starts a single-key DTMF selection window for the active call.
+        /// </summary>
+        Task<DtmfInputResult> RequestDtmfInputAsync(
+            DtmfKey keys,
+            CancellationToken cancellationToken = default);
     }
 }

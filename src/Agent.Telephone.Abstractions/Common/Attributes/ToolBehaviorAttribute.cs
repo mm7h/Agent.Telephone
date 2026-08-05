@@ -28,5 +28,11 @@ namespace Agent.Telephone.Abstractions.Common.Attributes
         /// 默认为 true，表示允许；如果设置为 false，则该函数只能被显式调用，意图识别模块不会将其作为候选工具。
         /// </summary>
         public bool AllowIntentDetection { get; set; } = true;
+
+        /// <summary>
+        /// Keys that may select this function from an active DTMF menu.
+        /// Multiple keys can be combined with the bitwise OR operator.
+        /// </summary>
+        public DtmfKey DtmfKeys { get; set; } = DtmfKey.None;
     }
 }

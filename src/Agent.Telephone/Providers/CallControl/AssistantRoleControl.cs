@@ -84,7 +84,7 @@ namespace Agent.Telephone.Providers.CallControl
             bool switchResult = await this.SwitchAssistantCoreAsync(
                 call.DeviceContext,
                 targetAssistantNumber,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken);
 
             return new AssistantSwitchResult(
                 switchResult ? AssistantSwitchStatus.Accepted : AssistantSwitchStatus.Failed,
@@ -171,7 +171,7 @@ namespace Agent.Telephone.Providers.CallControl
                         currentActiveCall.UserAgent.IsCallActive)
                     {
                         await this.StopRingbackAsync(ringbackCts, ringbackTask)
-                            .ConfigureAwait(false);
+                            ;
                         ringbackStopped = true;
                     }
 
@@ -180,18 +180,18 @@ namespace Agent.Telephone.Providers.CallControl
 
                 sessionReplaced = true;
 
-                if (!await this.BuildAgentPipelineAsync(deviceContext).ConfigureAwait(false))
+                if (!await this.BuildAgentPipelineAsync(deviceContext))
                 {
                     await this.StopRingbackAsync(ringbackCts, ringbackTask)
-                        .ConfigureAwait(false);
+                        ;
                     ringbackStopped = true;
                     await this.PlayUnavailableAndEndAsync(currentActiveCall)
-                        .ConfigureAwait(false);
+                        ;
                     return false;
                 }
 
                 await this.StopRingbackAsync(ringbackCts, ringbackTask)
-                    .ConfigureAwait(false);
+                    ;
                 ringbackStopped = true;
                 currentActiveCall.ResumeAgentMedia();
                 deviceContext.MarkCallConnected(currentActiveCall);
@@ -221,12 +221,12 @@ namespace Agent.Telephone.Providers.CallControl
                     currentActiveCall.UserAgent.IsCallActive)
                 {
                     await this.StopRingbackAsync(ringbackCts, ringbackTask)
-                        .ConfigureAwait(false);
+                        ;
                     ringbackStopped = true;
                     if (sessionReplaced)
                     {
                         await this.PlayUnavailableAndEndAsync(currentActiveCall)
-                            .ConfigureAwait(false);
+                            ;
                     }
                 }
 
@@ -237,7 +237,7 @@ namespace Agent.Telephone.Providers.CallControl
                 if (!ringbackStopped)
                 {
                     await this.StopRingbackAsync(ringbackCts, ringbackTask)
-                        .ConfigureAwait(false);
+                        ;
                 }
 
                 // 原 Agent 会话仍然存活时，恢复其媒体处理，让当前通话继续。
@@ -254,11 +254,11 @@ namespace Agent.Telephone.Providers.CallControl
         {
             return await this._functionToolManager
                 .BuildForActiveCallAsync(deviceContext)
-                .ConfigureAwait(false) &&
+                 &&
                 await this._providerManager.BuildForActiveCallAsync(deviceContext)
-                    .ConfigureAwait(false) &&
+                     &&
                 await this._handlerManager.BuildForConnectedCallAsync(deviceContext)
-                    .ConfigureAwait(false);
+                    ;
         }
 
         private async Task StopRingbackAsync(
@@ -267,8 +267,8 @@ namespace Agent.Telephone.Providers.CallControl
         {
             try
             {
-                await ringbackCts.CancelAsync().ConfigureAwait(false);
-                await ringbackTask.ConfigureAwait(false);
+                await ringbackCts.CancelAsync();
+                await ringbackTask;
             }
             catch (Exception exception)
             {
@@ -285,7 +285,7 @@ namespace Agent.Telephone.Providers.CallControl
                     SIPResponseStatusCodesEnum.TemporarilyUnavailable,
                     activeCall.VoIPRTP,
                     activeCall.NegotiatedAudioFormat,
-                    activeCall.CallToken).ConfigureAwait(false);
+                    activeCall.CallToken);
             }
             catch (Exception exception)
             {

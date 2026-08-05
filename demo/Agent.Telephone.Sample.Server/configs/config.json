@@ -15,11 +15,13 @@
   },
   "PromptMediaPath": "./data/prompt-media",
   "PromptMediaConfigs": {
-    "486": "486.mp3", // busy here
-    "480": "480.mp3", // assistant temporary unavailable
-    "488": "488.mp3", // not acceptable here
+    "180": "180.mp3", // assistant switching ringback
+    "402": "402.mp3", // payment required
     "404": "404.mp3", // not found
-    "180": "180.mp3" // assistant switching ringback
+    "480": "480.mp3", // assistant temporary unavailable
+    "486": "486.mp3", // busy here
+    "488": "488.mp3", // not acceptable here
+    "503": "503.mp3" // service unavailable
   },
   "AssistantConfigs": [
     {

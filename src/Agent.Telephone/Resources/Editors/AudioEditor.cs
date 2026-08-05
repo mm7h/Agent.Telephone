@@ -122,7 +122,7 @@ namespace Agent.Telephone.Resources.Editors
 
             while (!cancellationToken.IsCancellationRequested)
             {
-                if (!await this.PlayAudioAsync(audioBytes, cancellationToken).ConfigureAwait(false))
+                if (!await this.PlayAudioAsync(audioBytes, cancellationToken))
                 {
                     return false;
                 }
@@ -162,7 +162,7 @@ namespace Agent.Telephone.Resources.Editors
                         audioBytes,
                         mediaSession,
                         audioFormat,
-                        cancellationToken).ConfigureAwait(false))
+                        cancellationToken))
                 {
                     return false;
                 }
@@ -290,8 +290,8 @@ namespace Agent.Telephone.Resources.Editors
             {
                 source.RestrictFormats(format => format.Codec == this._supportedAudioFormat.Codec);
                 source.SetAudioSourceFormat(this._supportedAudioFormat);
-                await source.StartAudio().ConfigureAwait(false);
-                return await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await source.StartAudio();
+                return await completion.Task.WaitAsync(cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -308,7 +308,7 @@ namespace Agent.Telephone.Resources.Editors
                 source.OnAudioSourceError -= OnSourceError;
                 try
                 {
-                    await source.CloseAudio().ConfigureAwait(false);
+                    await source.CloseAudio();
                 }
                 catch (Exception exception)
                 {
@@ -347,7 +347,7 @@ namespace Agent.Telephone.Resources.Editors
 
                     TimeSpan frameDuration = TimeSpan.FromSeconds(
                         (double)duration / CachedAudioSampleRate);
-                    await Task.Delay(frameDuration, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(frameDuration, cancellationToken);
                 }
 
                 return true;
@@ -387,7 +387,7 @@ namespace Agent.Telephone.Resources.Editors
 
                     TimeSpan frameDuration = TimeSpan.FromSeconds(
                         (double)resampled.Length / audioFormat.ClockRate);
-                    await Task.Delay(frameDuration, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(frameDuration, cancellationToken);
                 }
 
                 return true;
@@ -444,8 +444,8 @@ namespace Agent.Telephone.Resources.Editors
             {
                 source.RestrictFormats(format => format.Codec == audioFormat.Codec);
                 source.SetAudioSourceFormat(audioFormat);
-                await source.StartAudio().ConfigureAwait(false);
-                return await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await source.StartAudio();
+                return await completion.Task.WaitAsync(cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -462,7 +462,7 @@ namespace Agent.Telephone.Resources.Editors
                 source.OnAudioSourceError -= OnSourceError;
                 try
                 {
-                    await source.CloseAudio().ConfigureAwait(false);
+                    await source.CloseAudio();
                 }
                 catch (Exception exception)
                 {

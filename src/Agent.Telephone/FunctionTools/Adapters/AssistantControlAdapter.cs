@@ -1,5 +1,6 @@
 ﻿using Agent.Telephone.Abstractions.Common.Contexts;
 using Agent.Telephone.Abstractions.FunctionTools;
+using Agent.Telephone.Abstractions.Common.Enums;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Providers;
 
@@ -14,15 +15,9 @@ namespace Agent.Telephone.FunctionTools.Adapters
     {
         private readonly ActiveCallContext _activeCall;
 
-        /// <summary>
-        /// The call-control provider, exposed through its abstract interface.
-        /// </summary>
-        public ICallControl CallControl { get; }
-
-        public AssistantControlAdapter(ActiveCallContext activeCall, ICallControl callControl)
+        public AssistantControlAdapter(ActiveCallContext activeCall)
         {
             this._activeCall = activeCall;
-            this.CallControl = callControl;
         }
 
         public string? CallerNumber => this._activeCall.CallerNumber;
@@ -36,7 +31,25 @@ namespace Agent.Telephone.FunctionTools.Adapters
             string targetAssistantNumber,
             CancellationToken cancellationToken = default)
         {
-            return this.CallControl.SwitchAssistantAsync(this._activeCall, targetAssistantNumber, cancellationToken);
+            ICallControl? callControl = this._activeCall.AIAgentContext.PrivateProvider.CallControl;
+            return callControl is null
+                ? Task.FromResult(new AssistantSwitchResult(
+                    AssistantSwitchStatus.Failed,
+                    targetAssistantNumber,
+                    "通话控制功能尚未就绪。"))
+                : callControl.SwitchAssistantAsync(this._activeCall, targetAssistantNumber, cancellationToken);
+        }
+
+        public Task<DtmfInputResult> RequestDtmfInputAsync(
+            DtmfKey keys,
+            CancellationToken cancellationToken = default)
+        {
+            IDtmfInput? dtmfInput = this._activeCall.AIAgentContext.PrivateProvider.DtmfInput;
+            return dtmfInput is null
+                ? Task.FromResult(new DtmfInputResult(
+                    DtmfInputStatus.Unavailable,
+                    "按键功能尚未就绪。"))
+                : dtmfInput.RequestDtmfInputAsync(this._activeCall, keys, cancellationToken);
         }
     }
 }

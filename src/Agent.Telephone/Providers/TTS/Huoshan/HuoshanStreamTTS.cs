@@ -157,7 +157,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
 
             var waitTask = this.WaitForEventAsync(MsgType.FullServerResponse, EventType.ConnectionStarted, cancellationToken, null);
             await this.SendMessage(message);
-            return await waitTask.ConfigureAwait(false);
+            return await waitTask;
         }
 
 
@@ -171,7 +171,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
 
             var waitTask = this.WaitForEventAsync(MsgType.FullServerResponse, EventType.SessionStarted, cancellationToken, null);
             await this.SendMessage(message);
-            return await waitTask.ConfigureAwait(false);
+            return await waitTask;
         }
 
         protected async Task<Message> FinishSessionAsync(string sessionId, CancellationToken cancellationToken)
@@ -185,7 +185,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             await this.SendMessage(message);
             try
             {
-                return await waitTask.ConfigureAwait(false);
+                return await waitTask;
             }
             catch (OperationCanceledException)
             {
@@ -202,7 +202,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
 
             var waitTask = this.WaitForEventAsync(MsgType.FullServerResponse, EventType.ConnectionFinished, cancellationToken, null);
             await this.SendMessage(message);
-            return await waitTask.ConfigureAwait(false);
+            return await waitTask;
         }
 
         protected async Task FinalizeSessionAudioAsync(string sessionId, string deviceId)
@@ -219,7 +219,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
 
             if (audioBuffer is not null && audioBuffer.Any())
             {
-                await this.SaveAudioFileAsync(deviceId, sessionId, audioBuffer.ToArray()).ConfigureAwait(false);
+                await this.SaveAudioFileAsync(deviceId, sessionId, audioBuffer.ToArray());
             }
         }
 
@@ -248,7 +248,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
 
             var waitTask = this.WaitForEventAsync(MsgType.FullServerResponse, EventType.SessionCanceled, cancellationToken, null);
             await this.SendMessage(message);
-            return await waitTask.ConfigureAwait(false);
+            return await waitTask;
         }
 
         protected Task<Message> WaitForEventAsync(MsgType msgType, EventType eventType, CancellationToken cancellationToken, TimeSpan? timeout = null)
@@ -420,7 +420,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             {
                 if (this.AudioSavingConfig is not null && this.AudioSavingConfig.SaveFile && !string.IsNullOrWhiteSpace(message.SessionId))
                 {
-                    this.FinalizeSessionAudioAsync(message.SessionId, this.DeviceId).ConfigureAwait(false);
+                    this.FinalizeSessionAudioAsync(message.SessionId, this.DeviceId);
                 }
 
                 if (this.StreamingActive && !string.IsNullOrWhiteSpace(message.SessionId))

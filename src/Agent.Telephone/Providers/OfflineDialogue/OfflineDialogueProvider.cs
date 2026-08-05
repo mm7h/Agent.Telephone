@@ -89,7 +89,7 @@ namespace Agent.Telephone.Providers.OfflineDialogue
             try
             {
                 message = await this._messageStore.SaveAsync(message, cancellationToken)
-                    .ConfigureAwait(false);
+                    ;
                 messages[audioPath] = message;
             }
             catch
@@ -103,7 +103,7 @@ namespace Agent.Telephone.Providers.OfflineDialogue
                     message.UserAor,
                     message.AssistantNumber,
                     message.Id,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken);
                 if (isLastSegment)
                 {
                     this.RemoveTracking(turnKey);
@@ -132,7 +132,7 @@ namespace Agent.Telephone.Providers.OfflineDialogue
                         message.UserAor,
                         message.AssistantNumber,
                         message.Id,
-                        cancellationToken).ConfigureAwait(false);
+                        cancellationToken);
                 }
             }
             if (!fullyPlayed || this._lastTrackedSegments.ContainsKey(turnKey))
@@ -177,14 +177,14 @@ namespace Agent.Telephone.Providers.OfflineDialogue
                     IReadOnlyList<MessageRecord> messages = await this._messageStore.GetUnreadAsync(
                         activeCall.UserAor,
                         assistantNumber,
-                        playbackCts.Token).ConfigureAwait(false);
+                        playbackCts.Token);
                     foreach (MessageRecord message in messages)
                     {
                         bool played = await this._audioEditor.PlayFileAsync(
                             message.AudioPath,
                             activeCall.VoIPRTP,
                             activeCall.NegotiatedAudioFormat,
-                            playbackCts.Token).ConfigureAwait(false);
+                            playbackCts.Token);
                         if (!played)
                         {
                             break;
@@ -194,7 +194,7 @@ namespace Agent.Telephone.Providers.OfflineDialogue
                             message.UserAor,
                             message.AssistantNumber,
                             message.Id,
-                            playbackCts.Token).ConfigureAwait(false);
+                            playbackCts.Token);
                     }
                 }
                 catch (OperationCanceledException) when (playbackCts.IsCancellationRequested)

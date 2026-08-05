@@ -137,17 +137,17 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
                     .WithHeader("Authorization", $"Bearer;{this._accessToken}")
                     .AllowAnyHttpStatus()
                     .PostJsonAsync(ttsReq, cancellationToken: token)
-                    .ConfigureAwait(false);
+                    ;
 
                 if (!response.ResponseMessage.IsSuccessStatusCode)
                 {
-                    string err = await response.GetStringAsync().ConfigureAwait(false);
+                    string err = await response.GetStringAsync();
                     this.Logger.LogError("火山 HTTP TTS 失败：状态={status} 正文={body}", response.StatusCode, err);
                     this.TTSEventCallback?.OnProcessed(seg.Content, seg.IsFirstSegment, seg.IsLastSegment, TtsGenerateResult.Failed);
                     return;
                 }
 
-                TTSHttpResponse ttsHttpResponse = await response.GetJsonAsync<TTSHttpResponse>().ConfigureAwait(false);
+                TTSHttpResponse ttsHttpResponse = await response.GetJsonAsync<TTSHttpResponse>();
 
                 if (ttsHttpResponse.Code == 3000 && !string.IsNullOrWhiteSpace(ttsHttpResponse.Data))
                 {
@@ -157,7 +157,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
                     float[] pcmData = audioData.PcmBytesToFloat(16);
                     if (pcmData.Length > 0)
                     {
-                        await this.SaveAudioFileAsync(this.DeviceId, seg.SentenceId, pcmData).ConfigureAwait(false);
+                        await this.SaveAudioFileAsync(this.DeviceId, seg.SentenceId, pcmData);
                         this.TTSEventCallback?.OnProcessing(pcmData, false, false);
                     }
                     this.TTSEventCallback?.OnSentenceEnd(seg.Content, seg.SentenceId);

@@ -1,6 +1,7 @@
 ﻿using Agent.Telephone.FunctionTools;
 using Agent.Telephone.Providers;
 using Agent.Telephone.Providers.LLM.Contexts;
+using Agent.Telephone.Abstractions.Common.Enums;
 using Microsoft.Extensions.AI;
 
 namespace Agent.Telephone.Common.Contexts
@@ -27,6 +28,7 @@ namespace Agent.Telephone.Common.Contexts
         public ILlm? Llm { get; private set; }
         public ITts? Tts { get; private set; }
         public ICallControl? CallControl { get; private set; }
+        public IDtmfInput? DtmfInput { get; private set; }
 
         public void SetAudioProcessor(IAudioProcessor value) => this.AudioProcessor = value;
         public void SetVad(IVad value) => this.Vad = value;
@@ -34,6 +36,14 @@ namespace Agent.Telephone.Common.Contexts
         public void SetLlm(ILlm value) => this.Llm = value;
         public void SetTts(ITts value) => this.Tts = value;
         public void SetCallControl(ICallControl value) => this.CallControl = value;
+        public void SetDtmfInput(IDtmfInput value) => this.DtmfInput = value;
+
+        public DtmfKey GetAvailableDtmfKeys()
+        {
+            return this._functionToolRegistrations.Values.Aggregate(
+                DtmfKey.None,
+                static (keys, registration) => keys | registration.DtmfKeys);
+        }
 
         public void ClearCallControl(ICallControl value)
         {
@@ -84,6 +94,7 @@ namespace Agent.Telephone.Common.Contexts
             this.AudioProcessor?.Dispose();
             this.Llm?.Dispose();
             this.CallControl?.Dispose();
+            this.DtmfInput?.Dispose();
             this.FunctionTools.Clear();
             this._functionToolRegistrations.Clear();
             this._privateFunctionTools.Clear();

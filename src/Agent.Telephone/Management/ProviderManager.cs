@@ -10,6 +10,7 @@ using Agent.Telephone.Providers.ASR.Sherpa;
 using Agent.Telephone.Providers.AudioProcessor;
 using Agent.Telephone.Providers.CallControl;
 using Agent.Telephone.Providers.CallControl.Reservations;
+using Agent.Telephone.Providers.Dtmf;
 using Agent.Telephone.Providers.OfflineDialogue;
 using Agent.Telephone.Providers.LLM;
 using Agent.Telephone.Providers.LLM.Agents;
@@ -48,6 +49,8 @@ namespace Agent.Telephone.Management
                 RegisterLlm(services, config.ModelConfig);
                 RegisterTts(services, config.ModelConfig, GlobalProviderNames.GLOBAL_TTS);
                 RegisterOfflineDialogue(services, config.ModelConfig);
+                RegisterCallControl(services, config.ModelConfig);
+                services.AddTransient<IDtmfInput, DtmfInputProvider>();
 
                 services.AddSingleton<ProviderManager>();
             });
@@ -226,6 +229,7 @@ namespace Agent.Telephone.Management
 
                 providers.SetCallControl(
                     this.ServiceProvider.GetRequiredService<ICallControl>());
+                providers.SetDtmfInput(this.ServiceProvider.GetRequiredService<IDtmfInput>());
 
                 return true;
             }

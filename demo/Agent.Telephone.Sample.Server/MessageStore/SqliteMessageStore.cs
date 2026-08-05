@@ -59,22 +59,22 @@ namespace Agent.Telephone.Sample.Server.MessageStore
                 throw new ArgumentException("Message id cannot be empty.", nameof(message));
             }
 
-            await using SqliteConnection connection = await this.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-            await BeginImmediateAsync(connection, cancellationToken).ConfigureAwait(false);
+            await using SqliteConnection connection = await this.OpenConnectionAsync(cancellationToken);
+            await BeginImmediateAsync(connection, cancellationToken);
             try
             {
-                long? existingSequence = await GetSequenceAsync(connection, message.Id, cancellationToken).ConfigureAwait(false);
+                long? existingSequence = await GetSequenceAsync(connection, message.Id, cancellationToken);
                 long sequence = existingSequence ?? (message.Sequence > 0
                     ? message.Sequence
-                    : await GetNextSequenceAsync(connection, message.UserAor, message.AssistantNumber, cancellationToken).ConfigureAwait(false));
+                    : await GetNextSequenceAsync(connection, message.UserAor, message.AssistantNumber, cancellationToken));
                 MessageRecord stored = message with { Sequence = sequence };
-                await UpsertAsync(connection, stored, cancellationToken).ConfigureAwait(false);
-                await CommitAsync(connection, cancellationToken).ConfigureAwait(false);
+                await UpsertAsync(connection, stored, cancellationToken);
+                await CommitAsync(connection, cancellationToken);
                 return stored;
             }
             catch
             {
-                await RollbackAsync(connection).ConfigureAwait(false);
+                await RollbackAsync(connection);
                 throw;
             }
         }
@@ -86,7 +86,7 @@ namespace Agent.Telephone.Sample.Server.MessageStore
             CancellationToken cancellationToken = default)
         {
             ValidateIdentity(userAor, assistantNumber);
-            await using SqliteConnection connection = await this.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            await using SqliteConnection connection = await this.OpenConnectionAsync(cancellationToken);
             await using SqliteCommand command = connection.CreateCommand();
             command.CommandText = $"""
                 SELECT {MessageColumns}
@@ -96,8 +96,8 @@ namespace Agent.Telephone.Sample.Server.MessageStore
             command.Parameters.AddWithValue("$id", messageId);
             command.Parameters.AddWithValue("$userAor", userAor);
             command.Parameters.AddWithValue("$assistantNumber", assistantNumber);
-            await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+            return await reader.ReadAsync(cancellationToken)
                 ? SqliteMessageEntity.FromReader(reader).ToRecord()
                 : null;
         }
@@ -108,7 +108,7 @@ namespace Agent.Telephone.Sample.Server.MessageStore
             CancellationToken cancellationToken = default)
         {
             ValidateIdentity(userAor, assistantNumber);
-            await using SqliteConnection connection = await this.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            await using SqliteConnection connection = await this.OpenConnectionAsync(cancellationToken);
             await using SqliteCommand command = connection.CreateCommand();
             command.CommandText = $"""
                 SELECT {MessageColumns}
@@ -119,7 +119,7 @@ namespace Agent.Telephone.Sample.Server.MessageStore
             command.Parameters.AddWithValue("$userAor", userAor);
             command.Parameters.AddWithValue("$assistantNumber", assistantNumber);
             command.Parameters.AddWithValue("$unread", (int)DeliveryState.Unread);
-            return await ReadMessagesAsync(command, cancellationToken).ConfigureAwait(false);
+            return await ReadMessagesAsync(command, cancellationToken);
         }
 
         public async Task<bool> MarkReadAsync(
@@ -129,7 +129,7 @@ namespace Agent.Telephone.Sample.Server.MessageStore
             CancellationToken cancellationToken = default)
         {
             ValidateIdentity(userAor, assistantNumber);
-            await using SqliteConnection connection = await this.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            await using SqliteConnection connection = await this.OpenConnectionAsync(cancellationToken);
             await using SqliteCommand command = connection.CreateCommand();
             command.CommandText = """
                 UPDATE Messages
@@ -141,42 +141,42 @@ namespace Agent.Telephone.Sample.Server.MessageStore
             command.Parameters.AddWithValue("$assistantNumber", assistantNumber);
             command.Parameters.AddWithValue("$read", (int)DeliveryState.Read);
             command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
-            int updated = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            return updated > 0 || await this.GetAsync(userAor, assistantNumber, messageId, cancellationToken).ConfigureAwait(false) is not null;
+            int updated = await command.ExecuteNonQueryAsync(cancellationToken);
+            return updated > 0 || await this.GetAsync(userAor, assistantNumber, messageId, cancellationToken) is not null;
         }
 
         public async Task<MessageCleanupResult> CleanupAsync(
             DateTimeOffset now,
             CancellationToken cancellationToken = default)
         {
-            await using SqliteConnection connection = await this.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-            await BeginImmediateAsync(connection, cancellationToken).ConfigureAwait(false);
+            await using SqliteConnection connection = await this.OpenConnectionAsync(cancellationToken);
+            await BeginImmediateAsync(connection, cancellationToken);
             try
             {
-                int expiredRemoved = await this.RemoveExpiredAsync(connection, now.AddDays(-this._retentionDays), now, cancellationToken).ConfigureAwait(false);
-                int overflowRemoved = await this.DeleteOverflowAsync(connection, cancellationToken).ConfigureAwait(false);
-                await CommitAsync(connection, cancellationToken).ConfigureAwait(false);
+                int expiredRemoved = await this.RemoveExpiredAsync(connection, now.AddDays(-this._retentionDays), now, cancellationToken);
+                int overflowRemoved = await this.DeleteOverflowAsync(connection, cancellationToken);
+                await CommitAsync(connection, cancellationToken);
                 return new MessageCleanupResult(expiredRemoved, overflowRemoved);
             }
             catch
             {
-                await RollbackAsync(connection).ConfigureAwait(false);
+                await RollbackAsync(connection);
                 throw;
             }
         }
 
         private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
         {
-            await this.EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+            await this.EnsureInitializedAsync(cancellationToken);
             var connection = new SqliteConnection(this._connectionStringBuilder.ConnectionString);
             try
             {
-                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+                await connection.OpenAsync(cancellationToken);
                 return connection;
             }
             catch
             {
-                await connection.DisposeAsync().ConfigureAwait(false);
+                await connection.DisposeAsync();
                 throw;
             }
         }
@@ -188,7 +188,7 @@ namespace Agent.Telephone.Sample.Server.MessageStore
                 return;
             }
 
-            await this._initializationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await this._initializationGate.WaitAsync(cancellationToken);
             try
             {
                 if (this._initialized)
@@ -203,8 +203,8 @@ namespace Agent.Telephone.Sample.Server.MessageStore
                 }
 
                 await using var connection = new SqliteConnection(this._connectionStringBuilder.ConnectionString);
-                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-                await ExecuteNonQueryAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken).ConfigureAwait(false);
+                await connection.OpenAsync(cancellationToken);
+                await ExecuteNonQueryAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken);
                 await ExecuteNonQueryAsync(connection, """
                     CREATE TABLE IF NOT EXISTS Messages (
                         Id TEXT NOT NULL PRIMARY KEY,
@@ -220,14 +220,14 @@ namespace Agent.Telephone.Sample.Server.MessageStore
                         IsDelete INTEGER NOT NULL DEFAULT 0,
                         UNIQUE(UserAor, AssistantNumber, Sequence)
                     );
-                    """, cancellationToken).ConfigureAwait(false);
-                await EnsureIsDeleteColumnAsync(connection, cancellationToken).ConfigureAwait(false);
+                    """, cancellationToken);
+                await EnsureIsDeleteColumnAsync(connection, cancellationToken);
                 await ExecuteNonQueryAsync(connection, """
                     CREATE INDEX IF NOT EXISTS IX_Messages_ActiveUnreadPlayback
                     ON Messages(UserAor, AssistantNumber, IsDelete, State, Sequence);
                     CREATE INDEX IF NOT EXISTS IX_Messages_ActivePartitionCleanup
                     ON Messages(UserAor, AssistantNumber, IsDelete, State, CreatedAt);
-                    """, cancellationToken).ConfigureAwait(false);
+                    """, cancellationToken);
                 this._initialized = true;
             }
             finally
@@ -244,7 +244,7 @@ namespace Agent.Telephone.Sample.Server.MessageStore
             await using SqliteCommand command = connection.CreateCommand();
             command.CommandText = "SELECT Sequence FROM Messages WHERE Id = $id;";
             command.Parameters.AddWithValue("$id", messageId);
-            object? result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            object? result = await command.ExecuteScalarAsync(cancellationToken);
             return result is null || result is DBNull ? null : Convert.ToInt64(result);
         }
 
@@ -262,7 +262,7 @@ namespace Agent.Telephone.Sample.Server.MessageStore
                 """;
             command.Parameters.AddWithValue("$userAor", userAor);
             command.Parameters.AddWithValue("$assistantNumber", assistantNumber);
-            object? result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            object? result = await command.ExecuteScalarAsync(cancellationToken);
             return Convert.ToInt64(result);
         }
 
@@ -288,7 +288,7 @@ namespace Agent.Telephone.Sample.Server.MessageStore
                     IsDelete = 0;
                 """;
             AddMessageParameters(command, message);
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
         private async Task<int> RemoveExpiredAsync(
@@ -303,7 +303,7 @@ namespace Agent.Telephone.Sample.Server.MessageStore
                 : "DELETE FROM Messages WHERE CreatedAt < $expiryThreshold;";
             command.Parameters.AddWithValue("$expiryThreshold", expiryThreshold.ToString("O"));
             command.Parameters.AddWithValue("$now", now.ToString("O"));
-            return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            return await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
         private async Task<int> DeleteOverflowAsync(SqliteConnection connection, CancellationToken cancellationToken)
@@ -319,8 +319,8 @@ namespace Agent.Telephone.Sample.Server.MessageStore
                     HAVING COUNT(*) > $maximum;
                     """;
                 command.Parameters.AddWithValue("$maximum", this._maxMessagesPerConversation);
-                await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
                 {
                     partitions.Add((reader.GetString(0), reader.GetString(1), reader.GetInt64(2)));
                 }
@@ -356,7 +356,7 @@ namespace Agent.Telephone.Sample.Server.MessageStore
                 command.Parameters.AddWithValue("$assistantNumber", assistantNumber);
                 command.Parameters.AddWithValue("$read", (int)DeliveryState.Read);
                 command.Parameters.AddWithValue("$excess", count - this._maxMessagesPerConversation);
-                removed += await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                removed += await command.ExecuteNonQueryAsync(cancellationToken);
             }
 
             return removed;
@@ -367,8 +367,8 @@ namespace Agent.Telephone.Sample.Server.MessageStore
             CancellationToken cancellationToken)
         {
             var messages = new List<MessageRecord>();
-            await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
             {
                 messages.Add(SqliteMessageEntity.FromReader(reader).ToRecord());
             }
@@ -398,8 +398,8 @@ namespace Agent.Telephone.Sample.Server.MessageStore
             await using (SqliteCommand command = connection.CreateCommand())
             {
                 command.CommandText = "PRAGMA table_info(Messages);";
-                await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
                 {
                     if (string.Equals(reader.GetString(1), "IsDelete", StringComparison.OrdinalIgnoreCase))
                     {
@@ -417,7 +417,7 @@ namespace Agent.Telephone.Sample.Server.MessageStore
             await ExecuteNonQueryAsync(
                 connection,
                 "ALTER TABLE Messages ADD COLUMN IsDelete INTEGER NOT NULL DEFAULT 0;",
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken);
         }
 
         private static Task BeginImmediateAsync(SqliteConnection connection, CancellationToken cancellationToken) =>
@@ -430,7 +430,7 @@ namespace Agent.Telephone.Sample.Server.MessageStore
         {
             try
             {
-                await ExecuteNonQueryAsync(connection, "ROLLBACK;", CancellationToken.None).ConfigureAwait(false);
+                await ExecuteNonQueryAsync(connection, "ROLLBACK;", CancellationToken.None);
             }
             catch (SqliteException)
             {
@@ -444,7 +444,7 @@ namespace Agent.Telephone.Sample.Server.MessageStore
         {
             await using SqliteCommand command = connection.CreateCommand();
             command.CommandText = commandText;
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
         private static void ValidateIdentity(string userAor, string assistantNumber)

@@ -160,56 +160,9 @@
                     errors.Add($"Assistant DialingNumber '{dialingNumber}' is duplicated.");
                 }
 
-                foreach (string providerKind in s_providerKinds)
-                {
-                    string providerName = GetProviderName(assistant, providerKind);
-                    ValidateProvider(
-                        dialingNumber,
-                        providerKind,
-                        providerName,
-                        modelConfig,
-                        errors);
-                }
-
                 index++;
             }
         }
-
-        private static void ValidateProvider(
-            string dialingNumber,
-            string providerKind,
-            string providerName,
-            ModelConfig modelConfig,
-            ICollection<string> errors)
-        {
-            if (string.IsNullOrWhiteSpace(providerName))
-            {
-                errors.Add(
-                    $"Assistant '{dialingNumber}' must configure {providerKind}.");
-                return;
-            }
-
-            if (modelConfig.ConfiguredSettings is null
-                || !modelConfig.ConfiguredSettings.TryGetValue(providerKind, out var providers)
-                || providers is null
-                || !providers.ContainsKey(providerName))
-            {
-                errors.Add(
-                    $"Assistant '{dialingNumber}' references unknown {providerKind} provider '{providerName}'.");
-            }
-        }
-
-        private static string GetProviderName(AssistantConfig assistant, string providerKind) =>
-            providerKind switch
-            {
-                "VAD" => assistant.VAD,
-                "ASR" => assistant.ASR,
-                "Intent" => assistant.Intent,
-                "LLM" => assistant.LLM,
-                "TTS" => assistant.TTS,
-                "Memory" => assistant.Memory,
-                _ => string.Empty
-            };
 
         private static void ValidateOptionalFile(
             string? path,
