@@ -4,23 +4,12 @@
     {
         private const int AssistantSwitchingRingbackCode = 180;
 
-        private static readonly string[] ProviderKinds =
-        [
-            "VAD",
-            "ASR",
-            "Intent",
-            "LLM",
-            "TTS",
-            "Memory"
-        ];
-
         public static IReadOnlyList<string> Validate(TelephoneConfig config)
         {
             ArgumentNullException.ThrowIfNull(config);
 
             var errors = new List<string>();
             ValidateSip(config.SIPConfig, errors);
-            ValidateMessageStore(config.MessageStoreConfig, errors);
             ValidatePromptMedia(config.PromptMediaConfigs, config.AssistantConfigs, errors);
             ValidateAssistants(config.AssistantConfigs, config.ModelConfig, errors);
             return errors;
@@ -84,45 +73,6 @@
                 "SIPConfig.AgentInitializationTimeoutSeconds",
                 errors);
             ValidatePositive(config.CallbackTimeoutSeconds, "SIPConfig.CallbackTimeoutSeconds", errors);
-        }
-
-        private static void ValidateMessageStore(
-            MessageStoreConfig? config,
-            ICollection<string> errors)
-        {
-            if (config is null)
-            {
-                errors.Add("MessageStoreConfig is required.");
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(config.RootPath))
-            {
-                errors.Add("MessageStoreConfig.RootPath is required.");
-            }
-            else
-            {
-                try
-                {
-                    _ = Path.GetFullPath(config.RootPath);
-                }
-                catch (Exception exception) when (
-                    exception is ArgumentException
-                        or NotSupportedException
-                        or PathTooLongException)
-                {
-                    errors.Add("MessageStoreConfig.RootPath contains an invalid directory path.");
-                }
-            }
-            ValidatePositive(config.RetentionDays, "MessageStoreConfig.RetentionDays", errors);
-            ValidatePositive(
-                config.MaxMessagesPerConversation,
-                "MessageStoreConfig.MaxMessagesPerConversation",
-                errors);
-            ValidatePositive(
-                config.RecentConversationTurns,
-                "MessageStoreConfig.RecentConversationTurns",
-                errors);
         }
 
         private static void ValidatePromptMedia(
@@ -210,7 +160,7 @@
                     errors.Add($"Assistant DialingNumber '{dialingNumber}' is duplicated.");
                 }
 
-                foreach (string providerKind in ProviderKinds)
+                foreach (string providerKind in s_providerKinds)
                 {
                     string providerName = GetProviderName(assistant, providerKind);
                     ValidateProvider(

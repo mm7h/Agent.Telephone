@@ -4,8 +4,6 @@ using Agent.Telephone.Abstractions.FunctionTools;
 using Agent.Telephone.Abstractions.Persistence;
 using Agent.Telephone.Abstractions.Store;
 using Agent.Telephone.Management;
-using Agent.Telephone.Providers.Conversation;
-using Agent.Telephone.Providers.Conversation.Persistence;
 using Agent.Telephone.Store;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -30,31 +28,25 @@ namespace Agent.Telephone
 
         public IHostBuilder HostBuilder { get; private set; }
 
-        public IServerBuilder Initialize(TelephoneConfig config)
+        public IServerBuilder Initialize(TelephoneConfig config, IMessageStore messageStore)
         {
-            return this.Initialize(config, DefaultMemoryStore.Default);
+            return this.Initialize(config, DefaultMemoryStore.Default, messageStore);
         }
 
-        private IServerBuilder Initialize(TelephoneConfig config, IStore connectionStore)
+        private IServerBuilder Initialize(TelephoneConfig config, IStore connectionStore, IMessageStore messageStore)
         {
             if (config == null)
             {
                 throw new ArgumentNullException(nameof(config), "TelephoneConfig cannot be null.");
             }
+            ArgumentNullException.ThrowIfNull(messageStore);
             TelephoneConfigValidator.ValidateAndThrow(config);
 
             this.HostBuilder = this.HostBuilder.ConfigureServices((context, services) =>
             {
                 services.AddSingleton(config);
                 services.AddSingleton(connectionStore);
-                services.AddSingleton(config.MessageStoreConfig);
-                services.AddSingleton<IConversationStore, FileConversationStore>();
-                services.AddSingleton<ITurnStore, FileTurnStore>();
-                services.AddSingleton<IMessageStore, FileMessageStore>();
-                services.AddSingleton<IInterruptedTurnRecovery, FileInterruptedTurnRecovery>();
-                services.AddSingleton<InboundMessagePlayer>();
-                services.AddSingleton<IMessageDeliveryCoordinator, DeferredMessageDeliveryCoordinator>();
-                services.AddSingleton<ConversationProvider>();
+                services.AddSingleton<IMessageStore>(messageStore);
 
             })
             .RegisterLogger(config)
@@ -136,9 +128,6 @@ namespace Agent.Telephone
                 Serilog.Log.CloseAndFlush();
                 throw new ApplicationException("加载自定义 function 组件失败。请检查配置和提供者实现。");
             }
-            //todo
-            IMessageStore messageStore = serviceProvider.GetRequiredService<IMessageStore>();
-            messageStore.CleanupAsync(DateTimeOffset.UtcNow).GetAwaiter().GetResult();
         }
     }
 }

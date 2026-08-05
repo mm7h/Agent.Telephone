@@ -16,6 +16,7 @@ namespace Agent.Telephone.Providers.TTS.Sherpa
     {
         private readonly IAudioEditor _audioEditor;
         private readonly ConcurrentDictionary<string, ITtsEventCallback> _ttsSessions;
+        private readonly ConcurrentDictionary<string, string> _savedAudioPaths = new();
         private OfflineTts? _offlineTts;
 
         protected BaseSherpaTts(IAudioEditor audioEditor, ILogger<TLogger> logger) : base(logger)
@@ -53,6 +54,9 @@ namespace Agent.Telephone.Providers.TTS.Sherpa
         {
             this._ttsSessions.TryAdd(deviceId, callback);
         }
+
+        public string? GetSavedAudioFilePath(string sentenceId) =>
+            this._savedAudioPaths.TryGetValue(sentenceId, out string? path) ? path : null;
 
         public override void UnregisterDevice(string deviceId)
         {
@@ -144,6 +148,7 @@ namespace Agent.Telephone.Providers.TTS.Sherpa
                         bool saved = await this._audioEditor.SaveAudioFileAsync(filePath, audio.Samples, this.GetTtsSampleRate(), 1, 128000);
                         if (saved)
                         {
+                            this._savedAudioPaths[segment.SentenceId] = filePath;
                             this.Logger.LogDebug("保存 TTS 文件 {fileName} 成功，文件时长为：{duration}s。", fileName, this.FormatDuration(duration));
                         }
                         else

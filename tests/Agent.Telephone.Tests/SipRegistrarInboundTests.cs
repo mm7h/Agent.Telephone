@@ -7,7 +7,6 @@ using Agent.Telephone.Helpers;
 using Agent.Telephone.Management;
 using Agent.Telephone.Protocol.Server.Middlewares;
 using Agent.Telephone.Providers.CallControl.Reservations;
-using Agent.Telephone.Providers.Conversation;
 using Agent.Telephone.Store;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -273,12 +272,6 @@ public sealed class SipRegistrarInboundTests
             .AddLogging()
             .BuildServiceProvider();
         DeviceContextManager deviceManager = CreateDeviceManager(store, config, services);
-        ConversationProvider conversationProvider = new(
-            null!,
-            null!,
-            null!,
-            null!,
-            NullLogger<ConversationProvider>.Instance);
         FunctionToolManager functionTools = new(
             NullLoggerFactory.Instance,
             services,
@@ -291,7 +284,6 @@ public sealed class SipRegistrarInboundTests
         ProviderManager providers = new(
             services,
             config,
-            conversationProvider,
             NullLogger<ProviderManager>.Instance);
         var middleware = new DeviceContainerMiddleware(
             services,
@@ -300,7 +292,6 @@ public sealed class SipRegistrarInboundTests
             functionTools,
             handlers,
             providers,
-            conversationProvider,
             NullLogger<DeviceContainerMiddleware>.Instance);
         middleware.SubscribeSIPTransportEvents(serverTransport);
 

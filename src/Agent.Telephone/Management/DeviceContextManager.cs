@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SIPSorcery.SIP;
 using SIPSorcery.SIP.App;
+using SIPSorcery.Media;
 
 namespace Agent.Telephone.Management
 {
@@ -231,7 +232,7 @@ namespace Agent.Telephone.Management
             string userAor,
             string assistantNumber,
             SIPUserAgent userAgent,
-            SIPSorcery.Media.VoIPMediaSession mediaSession,
+            VoIPMediaSession mediaSession,
             out DeviceContext? device,
             out ActiveCallContext? activeCall)
         {

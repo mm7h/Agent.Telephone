@@ -134,48 +134,6 @@ public sealed class TelephoneConfigValidatorTests : IDisposable
             error => error.Contains("PromptMediaConfigs[180]", StringComparison.Ordinal));
     }
 
-    [Theory]
-    [InlineData("RootPath")]
-    [InlineData("RetentionDays")]
-    [InlineData("MaxMessagesPerConversation")]
-    [InlineData("RecentConversationTurns")]
-    public void InvalidMessageStoreRangeIsRejected(string property)
-    {
-        TelephoneConfig config = CreateValidConfig();
-        switch (property)
-        {
-            case "RootPath":
-                config.MessageStoreConfig.RootPath = " ";
-                break;
-            case "RetentionDays":
-                config.MessageStoreConfig.RetentionDays = 0;
-                break;
-            case "MaxMessagesPerConversation":
-                config.MessageStoreConfig.MaxMessagesPerConversation = 0;
-                break;
-            case "RecentConversationTurns":
-                config.MessageStoreConfig.RecentConversationTurns = 0;
-                break;
-        }
-
-        IReadOnlyList<string> errors = TelephoneConfigValidator.Validate(config);
-
-        Assert.Contains(errors, error => error.Contains($"MessageStoreConfig.{property}", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void InvalidMessageStoreRootPathIsRejected()
-    {
-        TelephoneConfig config = CreateValidConfig();
-        config.MessageStoreConfig.RootPath = "\0";
-
-        IReadOnlyList<string> errors = TelephoneConfigValidator.Validate(config);
-
-        Assert.Contains(
-            errors,
-            error => error.Contains("invalid directory path", StringComparison.Ordinal));
-    }
-
     public void Dispose()
     {
         if (Directory.Exists(this._root))
@@ -204,8 +162,7 @@ public sealed class TelephoneConfigValidatorTests : IDisposable
                 ConfiguredSettings = configuredSettings
             },
             AssistantConfigs = [CreateAssistant("10086")],
-            PromptMediaConfigs = new Dictionary<int, string>(),
-            MessageStoreConfig = new MessageStoreConfig()
+            PromptMediaConfigs = new Dictionary<int, string>()
         };
     }
 

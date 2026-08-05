@@ -8,5 +8,6 @@ namespace Agent.Telephone.Providers
     {
         void RegisterDevice(string deviceId, ITtsEventCallback callback);
         Task SynthesisAsync(Workflow<OutSegment> workflow, CancellationToken token);
+        string? GetSavedAudioFilePath(string sentenceId);
     }
 }

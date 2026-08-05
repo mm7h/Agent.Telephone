@@ -4,8 +4,6 @@ using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Helpers;
 using Agent.Telephone.Management;
-using Agent.Telephone.Providers.Conversation;
-using Agent.Telephone.Resources;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SIPSorcery.Net;
@@ -25,7 +23,6 @@ namespace Agent.Telephone.Protocol.Server.Middlewares
         private readonly FunctionToolManager _functionToolManager;
         private readonly HandlerManager _handlerManager;
         private readonly ProviderManager _providerManager;
-        private readonly ConversationProvider _conversationProvider;
         private readonly ILogger<DeviceContainerMiddleware> _logger;
 
         public DeviceContainerMiddleware(
@@ -35,7 +32,6 @@ namespace Agent.Telephone.Protocol.Server.Middlewares
             FunctionToolManager functionToolManager,
             HandlerManager handlerManager,
             ProviderManager providerManager,
-            ConversationProvider conversationProvider,
             ILogger<DeviceContainerMiddleware> logger)
         {
             this._serviceProvider = serviceProvider;
@@ -44,7 +40,6 @@ namespace Agent.Telephone.Protocol.Server.Middlewares
             this._functionToolManager = functionToolManager;
             this._handlerManager = handlerManager;
             this._providerManager = providerManager;
-            this._conversationProvider = conversationProvider;
             this._logger = logger;
         }
 
@@ -251,17 +246,6 @@ namespace Agent.Telephone.Protocol.Server.Middlewares
                 return;
             }
 
-            if (device.TryGetActiveRegistration(out RegistrationBinding? registration) &&
-                registration is not null &&
-                device.ActiveCall is null &&
-                this._conversationProvider.IsRunning(
-                    registration.Aor.ToString(),
-                    assistantNumber))
-            {
-                await this.AnswerBusyTurnAsync(device, request).ConfigureAwait(false);
-                return;
-            }
-
             if (!device.TryInitializeCallSession(request, out ActiveCallContext? activeCall) ||
                 activeCall is null)
             {
@@ -342,68 +326,6 @@ namespace Agent.Telephone.Protocol.Server.Middlewares
                     exception,
                     "设备 {deviceId} 的 Agent 初始化失败。",
                     device.DeviceId);
-            }
-        }
-
-        private async Task AnswerBusyTurnAsync(DeviceContext device, SIPRequest request)
-        {
-            if (!device.TryInitializeCallSession(request, out ActiveCallContext? activeCall) ||
-                activeCall is null)
-            {
-                await SendResponseAsync(
-                    this._sipTransport!,
-                    request,
-                    SIPResponseStatusCodesEnum.BusyHere,
-                    "Device already has an active call").ConfigureAwait(false);
-                return;
-            }
-
-            void OnAudioFormatsNegotiated(List<AudioFormat> formats)
-            {
-                activeCall.NegotiatedAudioFormat = formats.FirstOrDefault(format =>
-                    SupportedAudioFormats.SupportedAudioCodecs.Contains(format.Codec));
-            }
-
-            activeCall.VoIPRTP.OnAudioFormatsNegotiated += OnAudioFormatsNegotiated;
-            try
-            {
-                var serverAgent = device.TakePendingServerUserAgent(activeCall);
-                if (serverAgent is null ||
-                    !await activeCall.UserAgent.Answer(serverAgent, activeCall.VoIPRTP)
-                        .ConfigureAwait(false) ||
-                    activeCall.NegotiatedAudioFormat.IsEmpty())
-                {
-                    device.CloseCallSession(activeCall);
-                    return;
-                }
-
-                device.MarkPlayingPrompt(activeCall);
-                IAudioEditor? audioEditor = this._serviceProvider
-                    .GetService<IAudioEditor>();
-                if (audioEditor is not null)
-                {
-                    await audioEditor.PlaySIPCodeAudioAsync(
-                        SIPResponseStatusCodesEnum.BusyHere,
-                        activeCall.VoIPRTP,
-                        activeCall.NegotiatedAudioFormat,
-                        activeCall.CallToken).ConfigureAwait(false);
-                }
-            }
-            finally
-            {
-                activeCall.VoIPRTP.OnAudioFormatsNegotiated -= OnAudioFormatsNegotiated;
-                try
-                {
-                    if (activeCall.UserAgent.IsCallActive)
-                    {
-                        activeCall.UserAgent.Hangup();
-                    }
-                }
-                catch (Exception exception)
-                {
-                    this._logger.LogDebug(exception, "结束后台任务忙线提示通话时发生异常。");
-                }
-                device.CloseCallSession(activeCall);
             }
         }
 

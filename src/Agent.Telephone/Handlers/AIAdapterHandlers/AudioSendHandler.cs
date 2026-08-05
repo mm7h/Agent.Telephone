@@ -3,7 +3,6 @@ using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Helpers;
 using Agent.Telephone.Providers;
-using Agent.Telephone.Providers.Conversation;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
 using SIPSorceryMedia.Abstractions;
@@ -15,16 +14,16 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
     {
         private IAudioProcessor? _audioProcessor;
         private readonly ObjectPool<Workflow<float[]>> _audioWorkflowPool;
-        private readonly ConversationProvider _conversationProvider;
+        private readonly IOfflineDialogue _offlineDialogue;
 
         public AudioSendHandler(
             ObjectPool<Workflow<float[]>> audioWorkflowPool,
-            ConversationProvider conversationProvider,
+            IOfflineDialogue offlineDialogue,
             TelephoneConfig config,
             ILogger<AudioSendHandler> logger) : base(config, logger)
         {
             this._audioWorkflowPool = audioWorkflowPool;
-            this._conversationProvider = conversationProvider;
+            this._offlineDialogue = offlineDialogue;
         }
 
         public override string HandlerName => HandlerNames.AudioSendHandlerName;
@@ -161,7 +160,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             bool fullyPlayed)
         {
             return workflow.IsFinal
-                ? this._conversationProvider.MarkPlaybackEndedAsync(
+                ? this._offlineDialogue.MarkTurnPlaybackCompletedAsync(
                     this.ActiveCallContext,
                     workflow.TurnId,
                     fullyPlayed,

@@ -4,6 +4,7 @@ using Agent.Telephone;
 using Agent.Telephone.Abstractions;
 using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Sample.Server.FunctionTools;
+using Agent.Telephone.Sample.Server.MessageStore;
 using Microsoft.Extensions.Hosting;
 
 
@@ -29,8 +30,11 @@ try
 
     if (config is not null)
     {
+        SqliteMessageStore messageStore = new(new());
+        await messageStore.CleanupAsync(DateTimeOffset.UtcNow);
+
         // 开始初始化服务
-        serverHost = serverBuilder.Initialize(config)
+        serverHost = serverBuilder.Initialize(config, messageStore)
             // 添加自定义函数工具
             .WithFunctionTools<GetTime>()
             .WithPrivateFunctionTools<GetWeather>()

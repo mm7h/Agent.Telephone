@@ -13,18 +13,13 @@
     "AgentInitializationTimeoutSeconds": 30,
     "CallbackTimeoutSeconds": 30
   },
+  "PromptMediaPath": "./data/prompt-media",
   "PromptMediaConfigs": {
-    "486": "", // busy here
-    "480": "", // assistant temporary unavailable
-    "488": "", // not acceptable here
-    "404": "", // not found
-    "180": "./prompts/ringback.wav" // assistant switching ringback
-  },
-  "MessageStoreConfig": {
-    "RootPath": "./data/messages",
-    "RetentionDays": 30,
-    "MaxMessagesPerConversation": 100,
-    "RecentConversationTurns": 20
+    "486": "486.mp3", // busy here
+    "480": "480.mp3", // assistant temporary unavailable
+    "488": "488.mp3", // not acceptable here
+    "404": "404.mp3", // not found
+    "180": "180.mp3" // assistant switching ringback
   },
   "AssistantConfigs": [
     {

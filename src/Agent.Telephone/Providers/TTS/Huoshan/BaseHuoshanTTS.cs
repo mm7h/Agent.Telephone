@@ -3,6 +3,7 @@ using Agent.Telephone.Common.BuildConfigs;
 using Agent.Telephone.Helpers;
 using Agent.Telephone.Resources;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 
 namespace Agent.Telephone.Providers.TTS.Huoshan
 {
@@ -12,6 +13,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
         private const int SAMPLE_RATE = 24000;
 
         private readonly IAudioEditor _audioEditor;
+        private readonly ConcurrentDictionary<string, string> _savedAudioPaths = new();
 
         public BaseHuoshanTTS(IAudioEditor audioEditor, ILogger<TLogger> logger) : base(logger)
         {
@@ -33,6 +35,9 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             this.RegisterDevice(deviceId);
         }
 
+        public string? GetSavedAudioFilePath(string sentenceId) =>
+            this._savedAudioPaths.TryGetValue(sentenceId, out string? path) ? path : null;
+
         protected void BuildAudioSavingConfig(ModelSetting modelSetting)
         {
             this.AudioSavingConfig = modelSetting.Config.GetConfigValueOrDefault("FileSavingOption", new AudioSavingConfig(false));
@@ -46,25 +51,27 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
         {
             if (this.AudioSavingConfig is not null && this.AudioSavingConfig.SaveFile)
             {
-                fileName = $"{this.ProviderType}_{fileName}.{this.AudioSavingConfig.Format}";
-                string savingPath = Path.Combine(this.AudioSavingConfig.SavePath, fileName);
+                string sentenceId = fileName;
+                string savedFileName = $"{this.ProviderType}_{sentenceId}.{this.AudioSavingConfig.Format}";
+                string savingPath = Path.Combine(this.AudioSavingConfig.SavePath, savedFileName);
                 try
                 {
                     bool saved = await this._audioEditor.SaveAudioFileAsync(savingPath, audioData, this.GetTtsSampleRate(), 1, 128000);
 
                     if (saved)
                     {
-                        this.Logger.LogInformation("已将 TTS 音频文件保存到 {audioPath}，设备 {deviceId}。", fileName, deviceId);
+                        this._savedAudioPaths[sentenceId] = savingPath;
+                        this.Logger.LogInformation("已将 TTS 音频文件保存到 {audioPath}，设备 {deviceId}。", savedFileName, deviceId);
                     }
                     else
                     {
-                        this.Logger.LogWarning("保存音频文件 {fileName} 失败，设备 Id {deviceId}。", fileName, deviceId);
+                        this.Logger.LogWarning("保存音频文件 {fileName} 失败，设备 Id {deviceId}。", savedFileName, deviceId);
                     }
                     return saved;
                 }
                 catch (Exception ex)
                 {
-                    this.Logger.LogError(ex, "保存音频文件 {fileName} 失败，设备 Id {deviceId}。", fileName, deviceId);
+                    this.Logger.LogError(ex, "保存音频文件 {fileName} 失败，设备 Id {deviceId}。", savedFileName, deviceId);
                     return false;
                 }
 

@@ -10,7 +10,7 @@ using Agent.Telephone.Providers.ASR.Sherpa;
 using Agent.Telephone.Providers.AudioProcessor;
 using Agent.Telephone.Providers.CallControl;
 using Agent.Telephone.Providers.CallControl.Reservations;
-using Agent.Telephone.Providers.Conversation;
+using Agent.Telephone.Providers.OfflineDialogue;
 using Agent.Telephone.Providers.LLM;
 using Agent.Telephone.Providers.LLM.Agents;
 using Agent.Telephone.Providers.LLM.Agents.Intent;
@@ -30,16 +30,12 @@ namespace Agent.Telephone.Management
 {
     internal sealed class ProviderManager : BaseManager
     {
-        private readonly ConversationProvider _conversationProvider;
-
         public ProviderManager(
             IServiceProvider serviceProvider,
             TelephoneConfig config,
-            ConversationProvider conversationProvider,
             ILogger<ProviderManager> logger)
             : base(serviceProvider, config, logger)
         {
-            this._conversationProvider = conversationProvider;
         }
 
         public static IHostBuilder RegisterServices(IHostBuilder builder, TelephoneConfig config)
@@ -51,6 +47,7 @@ namespace Agent.Telephone.Management
                 RegisterAsr(services, config.ModelConfig, GlobalProviderNames.GLOBAL_ASR);
                 RegisterLlm(services, config.ModelConfig);
                 RegisterTts(services, config.ModelConfig, GlobalProviderNames.GLOBAL_TTS);
+                RegisterOfflineDialogue(services, config.ModelConfig);
 
                 services.AddSingleton<ProviderManager>();
             });
@@ -68,9 +65,10 @@ namespace Agent.Telephone.Management
                     return false;
                 }
 
-                if (!this._conversationProvider.Build(ModelSetting.Empty))
+                IOfflineDialogue offlineDialogue = this.ServiceProvider.GetRequiredService<IOfflineDialogue>();
+                if (!offlineDialogue.Build(ModelSetting.Empty))
                 {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", this._conversationProvider.ModelName);
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", offlineDialogue.ModelName);
                     return false;
                 }
 
@@ -174,16 +172,6 @@ namespace Agent.Telephone.Management
                 ModelSetting selectedChatLLMModelSetting = this.GetConfiguredSetting("LLM", activeCall.AssistantConfig.LLM, this.Config.ModelConfig);
                 selectedChatLLMModelSetting.Config.SetConfigValue("IntentType", intentType);
                 selectedChatLLMModelSetting.Config.SetConfigValue("Prompt", activeCall.AssistantConfig.Prompt);
-                int maximumTurns = this.GetMaximumMemoryTurns(activeCall.AssistantConfig);
-                string? recentMemory = await this._conversationProvider.BuildRecentMemoryAsync(
-                    activeCall.UserAor,
-                    activeCall.AssistantConfig.DialingNumber,
-                    maximumTurns,
-                    activeCall.CallToken).ConfigureAwait(false);
-                if (!string.IsNullOrWhiteSpace(recentMemory))
-                {
-                    selectedChatLLMModelSetting.Config.SetConfigValue("SummaryMemory", recentMemory);
-                }
                 pendingLlm = this.ServiceProvider.GetRequiredKeyedService<ILlm>(
                     ConvertToKebabCase(activeCall.AssistantConfig.LLM));
 
@@ -263,22 +251,6 @@ namespace Agent.Telephone.Management
                     pendingTts.Dispose();
                 }
             }
-        }
-
-        private int GetMaximumMemoryTurns(AssistantConfig assistant)
-        {
-            int configuredMaximum = this.Config.MessageStoreConfig.RecentConversationTurns;
-            if (this.Config.ModelConfig.ConfiguredSettings
-                    .TryGetValue("Memory", out var memories) &&
-                memories.TryGetValue(assistant.Memory, out var memoryConfig) &&
-                memoryConfig.TryGetValue("MaximumTurns", out string? configuredText) &&
-                int.TryParse(configuredText, out int parsed) &&
-                parsed > 0)
-            {
-                configuredMaximum = parsed;
-            }
-
-            return Math.Max(1, configuredMaximum);
         }
 
         private ModelSetting GetSelectedSherpaSetting(string selectedModelType, ModelConfig config)
@@ -506,9 +478,9 @@ namespace Agent.Telephone.Management
             services.AddSingleton<ICallControl, AssistantRoleControl>();
         }
 
-        private static void RegisterOfflineConversation(IServiceCollection services, ModelConfig config)
+        private static void RegisterOfflineDialogue(IServiceCollection services, ModelConfig config)
         {
-
+            services.AddSingleton<IOfflineDialogue, OfflineDialogueProvider>();
         }
 
         #endregion

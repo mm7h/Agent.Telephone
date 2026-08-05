@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using Agent.Telephone.Common.BuildConfigs;
 using Agent.Telephone.Common.Constants;
 using Microsoft.Extensions.Logging;
 using SIPSorcery.Media;
@@ -9,7 +10,7 @@ using ISIPSorceryAudioCodec = SIPSorcery.Media.AudioEncoder;
 
 namespace Agent.Telephone.Resources.AudioFileCaching
 {
-    internal class DefaultAudioFileCaching : BaseResource<DefaultAudioFileCaching, IDictionary<int, string>>, IAudioFileCaching
+    internal class DefaultAudioFileCaching : BaseResource<DefaultAudioFileCaching, AudioFileCachingBuildConfig>, IAudioFileCaching
     {
         private const string END_OF_FILE = "End of file";
         private static readonly TimeSpan s_fileDecodeTimeout = TimeSpan.FromSeconds(180);
@@ -25,11 +26,11 @@ namespace Agent.Telephone.Resources.AudioFileCaching
         public override string ResourceName => nameof(DefaultAudioFileCaching);
 
 
-        public override bool Load(IDictionary<int, string> settings)
+        public override bool Load(AudioFileCachingBuildConfig settings)
         {
             try
             {
-                foreach (KeyValuePair<int, string> kvp in settings)
+                foreach (KeyValuePair<int, string> kvp in settings.PromptMediaConfigs)
                 {
                     // 空路径表示该提示音未配置，属于可选提示音，跳过即可。
                     if (string.IsNullOrWhiteSpace(kvp.Value))
@@ -44,9 +45,9 @@ namespace Agent.Telephone.Resources.AudioFileCaching
                             .First(format => format.Codec == AudioCodecsEnum.PCMU);
                     }
 
-                    if (!this.CacheAudioFile((SIPResponseStatusCodesEnum)kvp.Key, kvp.Value))
+                    if (!this.CacheAudioFile(settings.PromptMediaPath, (SIPResponseStatusCodesEnum)kvp.Key, kvp.Value))
                     {
-                        this.Logger.LogWarning("音频文件 {FilePath} 缓存失败。", kvp.Value);
+                        this.Logger.LogWarning("音频文件 {FileName} 缓存失败。", kvp.Value);
                         return false;
                     }
                 }
@@ -72,8 +73,9 @@ namespace Agent.Telephone.Resources.AudioFileCaching
             return false;
         }
 
-        private bool CacheAudioFile(SIPResponseStatusCodesEnum cacheKey, string filePath)
+        private bool CacheAudioFile(string promptMediaPath, SIPResponseStatusCodesEnum cacheKey, string fileName)
         {
+            string filePath = Path.Combine(promptMediaPath, fileName);
             if (!File.Exists(filePath))
             {
                 this.Logger.LogWarning("音频文件 {FilePath} 不存在，无法缓存。", filePath);

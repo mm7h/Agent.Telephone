@@ -1,5 +1,6 @@
 ﻿using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Abstractions.FunctionTools;
+using Agent.Telephone.Abstractions.Persistence;
 using Microsoft.Extensions.Hosting;
 
 namespace Agent.Telephone.Abstractions
@@ -14,9 +15,10 @@ namespace Agent.Telephone.Abstractions
         /// 初始化服务
         /// </summary>
         /// <param name="config">配置信息</param>
+        /// <param name="messageStore">消息存储实现</param>
         /// <returns></returns>
         /// <exception cref="ArgumentNullException"></exception>
-        IServerBuilder Initialize(TelephoneConfig config);
+        IServerBuilder Initialize(TelephoneConfig config, IMessageStore messageStore);
         /// <summary>
         /// 添加自定义验证
         /// </summary>

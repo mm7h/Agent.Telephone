@@ -2,10 +2,7 @@ namespace Agent.Telephone.Abstractions.Persistence
 {
     public interface IMessageStore
     {
-        Task SaveAsync(
-            MessageRecord message,
-            ReadOnlyMemory<byte> wave = default,
-            CancellationToken cancellationToken = default);
+        Task<MessageRecord> SaveAsync(MessageRecord message, CancellationToken cancellationToken = default);
 
         Task<MessageRecord?> GetAsync(
             string userAor,

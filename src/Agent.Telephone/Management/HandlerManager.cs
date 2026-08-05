@@ -3,7 +3,7 @@ using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Handlers;
 using Agent.Telephone.Handlers.AIAdapterHandlers;
 using Agent.Telephone.Handlers.SIPHandlers;
-using Agent.Telephone.Providers.Conversation;
+using Agent.Telephone.Providers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -158,8 +158,8 @@ namespace Agent.Telephone.Management
             if (answered)
             {
                 this.ServiceProvider
-                    .GetRequiredService<InboundMessagePlayer>()
-                    .Start(activeCallContext, text2Audio);
+                    .GetRequiredService<IOfflineDialogue>()
+                    .StartPlayback(activeCallContext);
             }
             return answered;
         }
