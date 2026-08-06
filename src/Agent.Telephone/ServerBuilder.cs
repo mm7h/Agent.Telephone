@@ -40,7 +40,6 @@ namespace Agent.Telephone
                 throw new ArgumentNullException(nameof(config), "TelephoneConfig cannot be null.");
             }
             ArgumentNullException.ThrowIfNull(messageStore);
-            TelephoneConfigValidator.ValidateAndThrow(config);
 
             this.HostBuilder = this.HostBuilder.ConfigureServices((context, services) =>
             {

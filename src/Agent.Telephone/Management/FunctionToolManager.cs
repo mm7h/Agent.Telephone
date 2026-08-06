@@ -244,13 +244,6 @@ namespace Agent.Telephone.Management
             }
         }
 
-        public Task<bool> BuildForActiveCallAsync(
-            DeviceContext deviceContext,
-            SIPTransport sipTransport)
-        {
-            return this.BuildForActiveCallAsync(deviceContext);
-        }
-
 
 
         public override void Dispose()
@@ -372,7 +365,7 @@ namespace Agent.Telephone.Management
                     tool.Type.Name,
                     tool.Type.FullName ?? string.Empty
                 });
-            IReadOnlyList<string> errors = TelephoneConfigValidator.ValidateAllowedTools(
+            IReadOnlyList<string> errors = ValidateAllowedTools(
                 this.Config.AssistantConfigs,
                 availableNames);
             foreach (string error in errors)
@@ -391,6 +384,36 @@ namespace Agent.Telephone.Management
             return string.Equals(allowed, methodMetadata.FunctionName, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(allowed, toolType.Name, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(allowed, toolType.FullName, StringComparison.OrdinalIgnoreCase);
+        }
+        private static IReadOnlyList<string> ValidateAllowedTools(
+            IEnumerable<AssistantConfig> assistants,
+            IEnumerable<string> availableTools)
+        {
+            ArgumentNullException.ThrowIfNull(assistants);
+            ArgumentNullException.ThrowIfNull(availableTools);
+
+            var available = availableTools
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var errors = new List<string>();
+            foreach (AssistantConfig? assistant in assistants)
+            {
+                if (assistant is null)
+                {
+                    continue;
+                }
+
+                foreach (string? allowedTool in assistant.AllowedTools ?? [])
+                {
+                    if (string.IsNullOrWhiteSpace(allowedTool) || !available.Contains(allowedTool))
+                    {
+                        errors.Add(
+                            $"Assistant '{assistant.DialingNumber}' references unknown tool '{allowedTool}'.");
+                    }
+                }
+            }
+
+            return errors;
         }
 
         private ServerInfoAdapter CreateServerInfoAdapter()

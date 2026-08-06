@@ -41,6 +41,12 @@ namespace Agent.Telephone
                 services.AddSingleton<ObjectPool<Workflow<float[]>>>(serviceProvider =>
                     serviceProvider.GetRequiredService<ObjectPoolProvider>().Create(new WorkflowPolicy<float[]>()));
 
+                services.AddSingleton<ObjectPool<OutAudioSegment>>(serviceProvider =>
+                    serviceProvider.GetRequiredService<ObjectPoolProvider>().Create(new OutAudioSegmentPolicy()));
+
+                services.AddSingleton<ObjectPool<Workflow<OutAudioSegment>>>(serviceProvider =>
+                    serviceProvider.GetRequiredService<ObjectPoolProvider>().Create(new WorkflowPolicy<OutAudioSegment>()));
+
                 services.AddSingleton<ObjectPool<Workflow<byte[]>>>(serviceProvider =>
                     serviceProvider.GetRequiredService<ObjectPoolProvider>().Create(new WorkflowPolicy<byte[]>()));
 

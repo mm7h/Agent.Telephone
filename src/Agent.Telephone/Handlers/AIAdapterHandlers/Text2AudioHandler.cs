@@ -10,20 +10,25 @@ using System.Threading.Channels;
 
 namespace Agent.Telephone.Handlers.AIAdapterHandlers
 {
-    internal sealed class Text2AudioHandler : BaseHandler, IInAIAdapterHandler<OutSegment>, IOutAIAdapterHandler<float[]>, ITtsEventCallback
+    internal sealed class Text2AudioHandler : BaseHandler, IInAIAdapterHandler<OutSegment>, IOutAIAdapterHandler<OutAudioSegment>, ITtsEventCallback
     {
         private ITts? _tts;
         private readonly ObjectPool<Workflow<OutSegment>> _segmentWorkflowPool;
         private readonly ObjectPool<OutSegment> _segmentPool;
-        private readonly ObjectPool<Workflow<float[]>> _audioWorkflowPool;
+        private readonly ObjectPool<Workflow<OutAudioSegment>> _audioWorkflowPool;
+        private readonly ObjectPool<OutAudioSegment> _audioSegmentPool;
         private readonly IOfflineDialogue _offlineDialogue;
         private readonly SemaphoreSlim _synthesisLock = new(1, 1);
         private long _activeTurnId;
+        private bool _isFirstSegment;
+        private bool _isLastSegment;
+        private bool _isFirstFrame;
         private PromptCapture? _promptCapture;
 
         public Text2AudioHandler(ObjectPool<Workflow<OutSegment>> segmentWorkflowPool,
             ObjectPool<OutSegment> segmentPool,
-            ObjectPool<Workflow<float[]>> audioWorkflowPool,
+            ObjectPool<Workflow<OutAudioSegment>> audioWorkflowPool,
+            ObjectPool<OutAudioSegment> audioSegmentPool,
             IOfflineDialogue offlineDialogue,
             TelephoneConfig config,
             ILogger<Text2AudioHandler> logger) : base(config, logger)
@@ -31,12 +36,13 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             this._segmentPool = segmentPool;
             this._segmentWorkflowPool = segmentWorkflowPool;
             this._audioWorkflowPool = audioWorkflowPool;
+            this._audioSegmentPool = audioSegmentPool;
             this._offlineDialogue = offlineDialogue;
         }
 
         public override string HandlerName => HandlerNames.Text2AudioHandlerName;
         public ChannelReader<Workflow<OutSegment>> PreviousReader { get; set; } = null!;
-        public ChannelWriter<Workflow<float[]>> NextWriter { get; set; } = null!;
+        public ChannelWriter<Workflow<OutAudioSegment>> NextWriter { get; set; } = null!;
 
         public override bool Build()
         {
@@ -124,6 +130,9 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         }
         public void OnBeforeProcessing(string sentence, bool isFirstSegment, bool isLastSegment)
         {
+            this._isFirstSegment = isFirstSegment;
+            this._isLastSegment = isLastSegment;
+            this._isFirstFrame = isFirstSegment;
         }
         public void OnProcessing(float[] audioData, bool isFirstFrame, bool isLastFrame)
         {
@@ -139,11 +148,17 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 return;
             }
 
-            Workflow<float[]> workflow = this._audioWorkflowPool.Get();
-            workflow.Initialize(
-                this.ActiveCallContext,
+            OutAudioSegment audioSegment = this._audioSegmentPool.Get();
+            audioSegment.Initialize(
                 audioData,
-                isFinal: false);
+                isFirstSegment: this._isFirstSegment,
+                isLastSegment: this._isLastSegment,
+                isFirstFrame: this._isFirstFrame || isFirstFrame,
+                isLastFrame: isLastFrame);
+            this._isFirstFrame = false;
+
+            Workflow<OutAudioSegment> workflow = this._audioWorkflowPool.Get();
+            workflow.Initialize(this.ActiveCallContext, audioSegment);
             try
             {
                 this.NextWriter
@@ -154,10 +169,12 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             catch (OperationCanceledException)
             {
+                this._audioSegmentPool.Return(audioSegment);
                 this._audioWorkflowPool.Return(workflow);
             }
             catch
             {
+                this._audioSegmentPool.Return(audioSegment);
                 this._audioWorkflowPool.Return(workflow);
             }
         }
@@ -182,11 +199,12 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
             if (isLastSegment && ttsGenerateResult == TtsGenerateResult.Success)
             {
-                Workflow<float[]> finalWorkflow = this._audioWorkflowPool.Get();
-                finalWorkflow.Initialize(
-                    this.ActiveCallContext,
-                    Array.Empty<float>(),
-                    isFinal: true);
+                OutAudioSegment finalSegment = this._audioSegmentPool.Get();
+                finalSegment.Initialize(
+                    isLastSegment: true,
+                    isLastFrame: true);
+                Workflow<OutAudioSegment> finalWorkflow = this._audioWorkflowPool.Get();
+                finalWorkflow.Initialize(this.ActiveCallContext, finalSegment);
                 try
                 {
                     this.NextWriter
@@ -197,6 +215,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 }
                 catch
                 {
+                    this._audioSegmentPool.Return(finalSegment);
                     this._audioWorkflowPool.Return(finalWorkflow);
                     _ = this._offlineDialogue.MarkTurnPlaybackCompletedAsync(
                         this.ActiveCallContext,

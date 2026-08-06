@@ -10,24 +10,27 @@ using System.Threading.Channels;
 
 namespace Agent.Telephone.Handlers.AIAdapterHandlers
 {
-    internal sealed class AudioSendHandler : BaseHandler, IInAIAdapterHandler<float[]>
+    internal sealed class AudioSendHandler : BaseHandler, IInAIAdapterHandler<OutAudioSegment>
     {
         private IAudioProcessor? _audioProcessor;
-        private readonly ObjectPool<Workflow<float[]>> _audioWorkflowPool;
+        private readonly ObjectPool<Workflow<OutAudioSegment>> _audioWorkflowPool;
+        private readonly ObjectPool<OutAudioSegment> _audioSegmentPool;
         private readonly IOfflineDialogue _offlineDialogue;
 
         public AudioSendHandler(
-            ObjectPool<Workflow<float[]>> audioWorkflowPool,
+            ObjectPool<Workflow<OutAudioSegment>> audioWorkflowPool,
+            ObjectPool<OutAudioSegment> audioSegmentPool,
             IOfflineDialogue offlineDialogue,
             TelephoneConfig config,
             ILogger<AudioSendHandler> logger) : base(config, logger)
         {
             this._audioWorkflowPool = audioWorkflowPool;
+            this._audioSegmentPool = audioSegmentPool;
             this._offlineDialogue = offlineDialogue;
         }
 
         public override string HandlerName => HandlerNames.AudioSendHandlerName;
-        public ChannelReader<Workflow<float[]>> PreviousReader { get; set; } = null!;
+        public ChannelReader<Workflow<OutAudioSegment>> PreviousReader { get; set; } = null!;
 
         public override bool Build()
         {
@@ -59,11 +62,12 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 }
                 finally
                 {
+                    this._audioSegmentPool.Return(workflow.Data);
                     this._audioWorkflowPool.Return(workflow);
                 }
             }
         }
-        public async Task HandleAsync(Workflow<float[]> workflow)
+        public async Task HandleAsync(Workflow<OutAudioSegment> workflow)
         {
             if (!this.CheckWorkflowValid(workflow))
             {
@@ -103,7 +107,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
             try
             {
-                this.DeviceContext.AudioOutputPacket.PushAudio(workflow.Data);
+                this.DeviceContext.AudioOutputPacket.PushAudio(workflow.Data.AudioData);
 
                 float[] samples = this.DeviceContext.AudioOutputPacket.GetAllAudio();
                 int analyzedIndex = 0;
@@ -123,7 +127,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                     await Task.Delay(packetTimeMs, this.HandlerToken);
                 }
 
-                if (workflow.IsFinal)
+                if (workflow.Data.IsLastSegment && workflow.Data.IsLastFrame)
                 {
                     float[] remaining = this.DeviceContext.AudioOutputPacket.GetAllAudio();
                     if (remaining.Length > 0)
@@ -156,10 +160,10 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         }
 
         private Task MarkFinalPlaybackAsync(
-            Workflow<float[]> workflow,
+            Workflow<OutAudioSegment> workflow,
             bool fullyPlayed)
         {
-            return workflow.IsFinal
+            return workflow.Data.IsLastSegment && workflow.Data.IsLastFrame
                 ? this._offlineDialogue.MarkTurnPlaybackCompletedAsync(
                     this.ActiveCallContext,
                     workflow.TurnId,
