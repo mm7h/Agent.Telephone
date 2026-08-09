@@ -1,3 +1,4 @@
+﻿using Agent.Telephone.Abstractions.Common.Enums;
 using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
@@ -20,10 +21,6 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         private readonly IOfflineDialogue _offlineDialogue;
         private readonly SemaphoreSlim _synthesisLock = new(1, 1);
         private long _activeTurnId;
-        private bool _isFirstSegment;
-        private bool _isLastSegment;
-        private bool _isFirstFrame;
-        private PromptCapture? _promptCapture;
 
         public Text2AudioHandler(ObjectPool<Workflow<OutSegment>> segmentWorkflowPool,
             ObjectPool<OutSegment> segmentPool,
@@ -46,22 +43,17 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
         public override bool Build()
         {
-            if (this.DeviceContext.ActiveCall is null)
-            {
-                this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法构建处理器。", this.DeviceContext.DeviceId);
-                return false;
-            }
-            PrivateProvider privateProvider = this.DeviceContext.ActiveCall.AIAgentContext.PrivateProvider;
+            PrivateProvider privateProvider = this.ActiveCallContext.AIAgentContext.PrivateProvider;
             if (privateProvider.Tts is null)
             {
-                this.Logger.LogError("设备 {deviceId} 未配置 TTS 提供程序。", this.DeviceContext.DeviceId);
+                this.Logger.LogError("设备 {deviceId} 未配置 TTS 提供程序。", this.ActiveCallContext.DeviceId);
                 return false;
             }
 
             this._tts = privateProvider.Tts;
-            this._tts.RegisterDevice(this.DeviceContext.DeviceId, this);
+            this._tts.RegisterDevice(this.ActiveCallContext.DeviceId, this);
 
-            this.RegisterCancellationToken(this.DeviceContext, continueAfterCallEnded: true);
+            this.RegisterCancellationToken(this.ActiveCallContext, continueAfterCallEnded: true);
             return true;
         }
 
@@ -88,7 +80,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             if (this._tts is null)
             {
-                this.Logger.LogError("TTS提供程序未为设备配置: {deviceId}。", this.DeviceContext.DeviceId);
+                this.Logger.LogError("TTS提供程序未为设备配置: {deviceId}。", this.ActiveCallContext.DeviceId);
                 return;
             }
             try
@@ -121,51 +113,42 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             catch (OperationCanceledException)
             {
-                this.Logger.LogDebug("TTS 合成已取消，设备 {DeviceId}。", this.DeviceContext.DeviceId);
+                this.Logger.LogDebug("TTS 合成已取消，设备 {DeviceId}。", this.ActiveCallContext.DeviceId);
             }
             catch (Exception exception)
             {
-                this.Logger.LogError(exception, "处理设备文本转语音时出错: {deviceId}。", this.DeviceContext.DeviceId);
+                this.Logger.LogError(exception, "处理设备文本转语音时出错: {deviceId}。", this.ActiveCallContext.DeviceId);
             }
         }
-        public void OnBeforeProcessing(string sentence, bool isFirstSegment, bool isLastSegment)
+        public async void OnBeforeProcessing(string sentence, bool isFirstSegment, bool isLastSegment)
         {
-            this._isFirstSegment = isFirstSegment;
-            this._isLastSegment = isLastSegment;
-            this._isFirstFrame = isFirstSegment;
+            if (isFirstSegment)
+            {
+                OutAudioSegment outAudioSegment = this._audioSegmentPool.Get();
+                Workflow<OutAudioSegment> nextWorkflow = this._audioWorkflowPool.Get();
+                outAudioSegment.Initialize(audioType: AudioType.TTS, content: sentence, isFirstSegment: isFirstSegment, isLastSegment: isLastSegment);
+
+                nextWorkflow.Initialize(this.ActiveCallContext, outAudioSegment);
+                await this.NextWriter.WriteAsync(nextWorkflow, this.HandlerToken);
+            }
+            this.Logger.LogDebug("设备 {deviceId} TTS 处理句子: {sentence}.", this.ActiveCallContext.DeviceId, sentence);
         }
-        public void OnProcessing(float[] audioData, bool isFirstFrame, bool isLastFrame)
+        public async void OnProcessing(float[] audioData, bool isFirstFrame, bool isLastFrame)
         {
             if (audioData.Length == 0 || this.HandlerToken.IsCancellationRequested)
             {
                 return;
             }
 
-            PromptCapture? promptCapture = this._promptCapture;
-            if (promptCapture is not null)
-            {
-                promptCapture.Append(audioData);
-                return;
-            }
-
             OutAudioSegment audioSegment = this._audioSegmentPool.Get();
-            audioSegment.Initialize(
-                audioData,
-                isFirstSegment: this._isFirstSegment,
-                isLastSegment: this._isLastSegment,
-                isFirstFrame: this._isFirstFrame || isFirstFrame,
-                isLastFrame: isLastFrame);
-            this._isFirstFrame = false;
+            audioSegment.Initialize(audioType: AudioType.TTS, audioData: audioData, isFirstFrame: isFirstFrame, isLastFrame: isLastFrame);
+
 
             Workflow<OutAudioSegment> workflow = this._audioWorkflowPool.Get();
             workflow.Initialize(this.ActiveCallContext, audioSegment);
             try
             {
-                this.NextWriter
-                    .WriteAsync(workflow, this.HandlerToken)
-                    .AsTask()
-                    .GetAwaiter()
-                    .GetResult();
+                await this.NextWriter.WriteAsync(workflow, this.HandlerToken);
             }
             catch (OperationCanceledException)
             {
@@ -181,37 +164,20 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
 
 
-        public void OnProcessed(string sentence, bool isFirstSegment, bool isLastSegment, TtsGenerateResult ttsGenerateResult)
+        public async void OnProcessed(string sentence, bool isFirstSegment, bool isLastSegment, TtsGenerateResult ttsGenerateResult)
         {
-            PromptCapture? promptCapture = this._promptCapture;
-            if (promptCapture is not null)
-            {
-                if (ttsGenerateResult == TtsGenerateResult.Failed)
-                {
-                    promptCapture.Fail(new InvalidOperationException("TTS prompt synthesis failed."));
-                }
-                else if (isLastSegment)
-                {
-                    promptCapture.Complete();
-                }
-                return;
-            }
-
             if (isLastSegment && ttsGenerateResult == TtsGenerateResult.Success)
             {
                 OutAudioSegment finalSegment = this._audioSegmentPool.Get();
                 finalSegment.Initialize(
+                    audioType: AudioType.TTS,
                     isLastSegment: true,
                     isLastFrame: true);
                 Workflow<OutAudioSegment> finalWorkflow = this._audioWorkflowPool.Get();
                 finalWorkflow.Initialize(this.ActiveCallContext, finalSegment);
                 try
                 {
-                    this.NextWriter
-                        .WriteAsync(finalWorkflow, this.HandlerToken)
-                        .AsTask()
-                        .GetAwaiter()
-                        .GetResult();
+                    await this.NextWriter.WriteAsync(finalWorkflow, this.HandlerToken);
                 }
                 catch
                 {
@@ -226,86 +192,56 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
         }
 
-        public async Task<float[]> SynthesizePromptAsync(
-            string text,
-            CancellationToken cancellationToken)
-        {
-            if (this._tts is null || string.IsNullOrWhiteSpace(text))
-            {
-                return [];
-            }
-
-            await this._synthesisLock.WaitAsync(cancellationToken);
-            PromptCapture capture = new();
-            this._promptCapture = capture;
-            try
-            {
-                OutSegment segment = new();
-                segment.Initialize(text, isFirst: true, isLast: true);
-                Workflow<OutSegment> workflow = new();
-                workflow.Initialize(this.ActiveCallContext, segment);
-                await this._tts.SynthesisAsync(workflow, cancellationToken);
-                return await capture.Completion.Task
-                    .WaitAsync(cancellationToken)
-                    ;
-            }
-            finally
-            {
-                this._promptCapture = null;
-                this._synthesisLock.Release();
-            }
-        }
         public void OnSentenceStart(string sentence, string sentenceId)
         {
-
+            this.QueueSubtitleMarker(sentence, sentenceId, isSentenceStart: true);
         }
         public void OnSentenceEnd(string sentence, string sentenceId)
         {
+            this.QueueSubtitleMarker(sentence, sentenceId, isSentenceStart: false);
+        }
 
+        private void QueueSubtitleMarker(string sentence, string sentenceId, bool isSentenceStart)
+        {
+            if (this.HandlerToken.IsCancellationRequested || string.IsNullOrWhiteSpace(sentenceId))
+            {
+                return;
+            }
+
+            OutAudioSegment audioSegment = this._audioSegmentPool.Get();
+            Workflow<OutAudioSegment> workflow = this._audioWorkflowPool.Get();
+            audioSegment.Initialize(
+                audioType: AudioType.TTS,
+                content: sentence,
+                isFirstFrame: isSentenceStart,
+                isLastFrame: !isSentenceStart,
+                sentenceId: $"{(isSentenceStart ? "S" : "E")}_{sentenceId}");
+            workflow.Initialize(this.ActiveCallContext, audioSegment);
+            try
+            {
+                this.NextWriter
+                    .WriteAsync(workflow, this.HandlerToken)
+                    .AsTask()
+                    .GetAwaiter()
+                    .GetResult();
+            }
+            catch
+            {
+                this._audioSegmentPool.Return(audioSegment);
+                this._audioWorkflowPool.Return(workflow);
+            }
         }
 
         public override void Dispose()
         {
             if (this._tts is not null)
             {
-                this._tts.UnregisterDevice(this.DeviceContext.DeviceId);
+                this._tts.UnregisterDevice(this.ActiveCallContext.DeviceId);
             }
             this.NextWriter?.TryComplete();
             this._synthesisLock.Dispose();
             base.Dispose();
         }
 
-        private sealed class PromptCapture
-        {
-            private readonly object _sync = new();
-            private readonly List<float> _audio = [];
-
-            public TaskCompletionSource<float[]> Completion { get; } = new(
-                TaskCreationOptions.RunContinuationsAsynchronously);
-
-            public void Append(ReadOnlySpan<float> audio)
-            {
-                lock (this._sync)
-                {
-                    for (int index = 0; index < audio.Length; index++)
-                    {
-                        this._audio.Add(audio[index]);
-                    }
-                }
-            }
-
-            public void Complete()
-            {
-                lock (this._sync)
-                {
-                    this.Completion.TrySetResult(this._audio.ToArray());
-                }
-            }
-
-            public void Fail(Exception exception)
-            {
-                this.Completion.TrySetException(exception);
-            }
-        }
     }
 }

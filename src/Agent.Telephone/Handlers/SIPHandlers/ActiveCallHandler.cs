@@ -16,12 +16,7 @@ namespace Agent.Telephone.Handlers.SIPHandlers
 
         public override bool Build()
         {
-            ActiveCallContext? activeCall = this.DeviceContext.ActiveCall;
-            if (activeCall is null)
-            {
-                this.Logger.LogError("设备 {deviceId} 没有活动呼叫上下文。", this.DeviceContext.DeviceId);
-                return false;
-            }
+            ActiveCallContext activeCall = this.ActiveCallContext;
             this._activeCall = activeCall;
             activeCall.UserAgent.OnCallHungup += this.OnCallHungup;
             activeCall.UserAgent.ServerCallCancelled += this.OnServerCallCancelled;
@@ -37,29 +32,29 @@ namespace Agent.Telephone.Handlers.SIPHandlers
             {
                 using (lease)
                 {
-                    var serverAgent = this.DeviceContext.TakePendingServerUserAgent(activeCall);
+                    var serverAgent = this.ActiveCallContext.DeviceContext.TakePendingServerUserAgent(activeCall);
                     if (serverAgent is null)
                     {
-                        this.Logger.LogWarning("设备 {deviceId} 的呼叫已取消或没有待应答事务。", this.DeviceContext.DeviceId);
+                        this.Logger.LogWarning("设备 {deviceId} 的呼叫已取消或没有待应答事务。", this.ActiveCallContext.DeviceId);
                         return false;
                     }
 
                     bool answered = await activeCall.UserAgent.Answer(serverAgent, activeCall.VoIPRTP);
                     if (answered && !activeCall.NegotiatedAudioFormat.IsEmpty())
                     {
-                        this.DeviceContext.MarkCallConnected(activeCall);
+                        this.ActiveCallContext.DeviceContext.MarkCallConnected(activeCall);
                         return true;
                     }
                     else
                     {
-                        this.Logger.LogWarning("设备 {deviceId} 未能协商 PCMU/PCMA 音频。", this.DeviceContext.DeviceId);
+                        this.Logger.LogWarning("设备 {deviceId} 未能协商 PCMU/PCMA 音频。", this.ActiveCallContext.DeviceId);
                         return false;
                     }
                 }
             }
             else
             {
-                this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法应答。", this.DeviceContext.DeviceId);
+                this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法应答。", this.ActiveCallContext.DeviceId);
                 return false;
             }
         }
@@ -83,7 +78,7 @@ namespace Agent.Telephone.Handlers.SIPHandlers
         {
             if (this._activeCall is not null)
             {
-                this.DeviceContext.CloseCallSession(this._activeCall);
+                this.ActiveCallContext.DeviceContext.CloseCallSession(this._activeCall);
             }
         }
 

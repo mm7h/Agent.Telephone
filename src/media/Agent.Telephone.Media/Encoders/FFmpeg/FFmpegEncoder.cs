@@ -1,31 +1,19 @@
-﻿using Agent.Telephone.Abstractions.Configs;
-using Agent.Telephone.Helper;
-using Agent.Telephone.Resources.AudioFileCaching;
-using FFmpeg.AutoGen;
+﻿using FFmpeg.AutoGen;
 using Microsoft.Extensions.Logging;
+using Agent.Telephone.Media.Utilities.Extensions;
 
-namespace Agent.Telephone.Resources.FileEncoders
+namespace Agent.Telephone.Media.Encoders.FFmpeg
 {
-    internal class FFmpegFileEncoder : BaseResource<FFmpegFileEncoder, ModelSetting>, IAudioFileEncoder
+    internal class FFmpegEncoder(ILogger<FFmpegEncoder> logger) : IAudioEncoder
     {
-        public FFmpegFileEncoder(ILogger<FFmpegFileEncoder> logger) : base(logger)
-        {
+        private readonly ILogger _logger = logger;
 
+        public Task<bool> EncodeAsync(string outputPath, float[] audioData, int sampleRate, int channels, int bitRate = 128000)
+        {
+            return Task.Run(() => this.EncodeAudio(outputPath, audioData, sampleRate, channels, bitRate));
         }
 
-        public override string ResourceName => nameof(FFmpegFileEncoder);
-
-        public override bool Load(ModelSetting settings)
-        {
-            return true;
-        }
-
-        public Task<bool> EncodeAudioFileAsync(string outputPath, float[] audioData, int sampleRate, int channels, int bitRate = 128000)
-        {
-            return Task.Run(() => this.EncodeAudioFile(outputPath, audioData, sampleRate, channels, bitRate));
-        }
-
-        private unsafe bool EncodeAudioFile(string outputPath, float[] audioData, int sampleRate, int channels, int bitRate)
+        private unsafe bool EncodeAudio(string outputPath, float[] audioData, int sampleRate, int channels, int bitRate)
         {
             AVFormatContext* formatContext = null;
             AVCodecContext* codecContext = null;
@@ -66,7 +54,7 @@ namespace Agent.Telephone.Resources.FileEncoders
 
                 AVSampleFormat* supportedSampleFmt = null;
                 ret = ffmpeg.avcodec_get_supported_config(null, codec, AVCodecConfig.AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, (void**)&supportedSampleFmt, null);
-                codecContext->sample_fmt = ret >= 0 && supportedSampleFmt != null ? *supportedSampleFmt : AVSampleFormat.AV_SAMPLE_FMT_FLTP;
+                codecContext->sample_fmt = (ret >= 0 && supportedSampleFmt != null) ? *supportedSampleFmt : AVSampleFormat.AV_SAMPLE_FMT_FLTP;
 
                 codecContext->sample_rate = sampleRate;
 
@@ -116,8 +104,8 @@ namespace Agent.Telephone.Resources.FileEncoders
                     throw new InvalidOperationException("Failed to allocate SwrContext");
                 }
 
-                AVChannelLayout srcLayout = new AVChannelLayout();
-                AVChannelLayout dstLayout = new AVChannelLayout();
+                AVChannelLayout srcLayout = new();
+                AVChannelLayout dstLayout = new();
 
                 ffmpeg.av_channel_layout_default(&srcLayout, channels);
                 ffmpeg.av_channel_layout_copy(&dstLayout, &codecContext->ch_layout);
@@ -162,7 +150,7 @@ namespace Agent.Telephone.Resources.FileEncoders
                     float* frameData = (float*)frame->data[0];
                     for (int i = 0; i < currentFrameSize * channels; i++)
                     {
-                        frameData[i] = audioData[processedSamples * channels + i];
+                        frameData[i] = audioData[(processedSamples * channels) + i];
                     }
 
                     AVFrame* convertedFrame = ffmpeg.av_frame_alloc();
@@ -311,11 +299,6 @@ namespace Agent.Telephone.Resources.FileEncoders
                 ".pcm" => AVCodecID.AV_CODEC_ID_PCM_S16LE,
                 _ => AVCodecID.AV_CODEC_ID_MP3
             };
-        }
-
-        public override void Dispose()
-        {
-
         }
     }
 }

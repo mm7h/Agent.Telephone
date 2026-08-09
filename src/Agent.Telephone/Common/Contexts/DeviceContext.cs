@@ -30,7 +30,6 @@ namespace Agent.Telephone.Common.Contexts
             this.DeviceId = sipRequest.GetDeviceId();
             this.AvailableAssistants = availableAssistants.ToDictionary(i => i.DialingNumber).AsReadOnly();
             this.AudioInPacket = new AudioInPacket();
-            this.AudioOutputPacket = new AudioOutputPacket();
             this.LoginTime = DateTimeOffset.Now;
             this.LastActivityTime = this.LoginTime;
             this.UpdateRegistration(sipRequest, contact, expiresSeconds);
@@ -74,7 +73,6 @@ namespace Agent.Telephone.Common.Contexts
         public SIPEndPoint LocalEndPoint => this.Registration?.LocalEndPoint ?? SIPEndPoint.Empty;
         public SIPEndPoint RemoteEndPoint => this.Registration?.RemoteEndPoint ?? SIPEndPoint.Empty;
         public AudioInPacket AudioInPacket { get; }
-        public AudioOutputPacket AudioOutputPacket { get; }
         public ActiveCallContext? ActiveCall
         {
             get

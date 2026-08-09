@@ -6,6 +6,6 @@ namespace Agent.Telephone.Handlers
     {
         string HandlerName { get; }
         bool Build();
-        DeviceContext DeviceContext { get; set; }
+        ActiveCallContext ActiveCallContext { get; set; }
     }
 }

@@ -17,13 +17,6 @@
         public T Data => this._data;
 
 
-        public void Initialize(DeviceContext context, T data)
-        {
-            ActiveCallContext activeCall = context.ActiveCall
-                ?? throw new InvalidOperationException("An active call is required to initialize a workflow.");
-            this.Initialize(activeCall, data);
-        }
-
         public void Initialize(ActiveCallContext activeCall, T data)
         {
             this._deviceId = activeCall.DeviceId;

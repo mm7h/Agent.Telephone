@@ -1,14 +1,14 @@
-﻿using Agent.Telephone.Abstractions.Configs;
+﻿using System.Collections.Concurrent;
+using System.Text.Json.Nodes;
+using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Common.Enums;
 using Agent.Telephone.Helpers;
+using Agent.Telephone.Protocol.WebSocket;
 using Agent.Telephone.Providers.TTS.Huoshan.Protocols.Enums;
 using Agent.Telephone.Providers.TTS.Huoshan.Protocols.Models;
-using Agent.Telephone.Resources;
 using Microsoft.Extensions.Logging;
-using System.Collections.Concurrent;
-using System.Text.Json.Nodes;
-using Agent.Telephone.Protocol.WebSocket;
+using IAudioEditor = Agent.Telephone.Media.Abstractions.IAudioEditor;
 
 namespace Agent.Telephone.Providers.TTS.Huoshan
 {
@@ -19,7 +19,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
         private readonly Dictionary<string, List<float>> _sessionAudioBuffers = new();
         private readonly List<PendingWait> _waits = new();
         private readonly object _waitsLock = new();
-        private static readonly TimeSpan DefaultWaitTimeout = TimeSpan.FromSeconds(15);
+        private static readonly TimeSpan s_defaultWaitTimeout = TimeSpan.FromSeconds(15);
 
         public HuoshanStreamTTS(IAudioEditor audioEditor, ILogger<TLogger> logger) : base(audioEditor, logger)
         {
@@ -87,7 +87,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
         {
             var message = Message.Create(MsgType.FullClientRequest, MsgTypeFlagBits.NoSeq);
             message.Payload = JsonHelper.SerializeToUtf8Bytes(ttsReq);
-            await this.SendMessage(message);
+            await this.SendMessageAsync(message);
         }
 
         protected async Task TaskRequestAsync(string sessionId, byte[] payload)
@@ -96,10 +96,10 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             message.EventType = EventType.TaskRequest;
             message.SessionId = sessionId;
             message.Payload = payload;
-            await this.SendMessage(message);
+            await this.SendMessageAsync(message);
         }
 
-        protected async Task SendMessage(Message message)
+        protected async Task SendMessageAsync(Message message)
         {
             if (this.WebSocketClient is null)
             {
@@ -156,7 +156,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             message.Payload = JsonHelper.SerializeToUtf8Bytes(new { });
 
             var waitTask = this.WaitForEventAsync(MsgType.FullServerResponse, EventType.ConnectionStarted, cancellationToken, null);
-            await this.SendMessage(message);
+            await this.SendMessageAsync(message);
             return await waitTask;
         }
 
@@ -170,7 +170,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             message.Payload = payload;
 
             var waitTask = this.WaitForEventAsync(MsgType.FullServerResponse, EventType.SessionStarted, cancellationToken, null);
-            await this.SendMessage(message);
+            await this.SendMessageAsync(message);
             return await waitTask;
         }
 
@@ -182,7 +182,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             message.Payload = JsonHelper.SerializeToUtf8Bytes(new { });
 
             var waitTask = this.WaitForEventAsync(MsgType.FullServerResponse, EventType.SessionFinished, cancellationToken, null);
-            await this.SendMessage(message);
+            await this.SendMessageAsync(message);
             try
             {
                 return await waitTask;
@@ -201,7 +201,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             message.Payload = JsonHelper.SerializeToUtf8Bytes(new { });
 
             var waitTask = this.WaitForEventAsync(MsgType.FullServerResponse, EventType.ConnectionFinished, cancellationToken, null);
-            await this.SendMessage(message);
+            await this.SendMessageAsync(message);
             return await waitTask;
         }
 
@@ -247,7 +247,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             message.Payload = JsonHelper.SerializeToUtf8Bytes(new { });
 
             var waitTask = this.WaitForEventAsync(MsgType.FullServerResponse, EventType.SessionCanceled, cancellationToken, null);
-            await this.SendMessage(message);
+            await this.SendMessageAsync(message);
             return await waitTask;
         }
 
@@ -284,14 +284,14 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
                 });
             }
 
-            var effectiveTimeout = timeout ?? DefaultWaitTimeout;
+            var effectiveTimeout = timeout ?? s_defaultWaitTimeout;
             timeoutCts = new CancellationTokenSource();
             _ = Task.Delay(effectiveTimeout, timeoutCts.Token).ContinueWith(_ =>
             {
                 bool removed;
                 lock (this._waitsLock)
                 {
-                    removed = _waits.Remove(pw);
+                    removed = this._waits.Remove(pw);
                 }
                 if (removed)
                 {
@@ -434,7 +434,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             bool matched = false;
             lock (this._waitsLock)
             {
-                for (int i = 0; i < _waits.Count; i++)
+                for (int i = 0; i < this._waits.Count; i++)
                 {
                     var pw = this._waits[i];
                     if (pw.Match(message))

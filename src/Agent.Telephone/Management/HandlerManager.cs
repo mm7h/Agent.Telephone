@@ -32,6 +32,7 @@ namespace Agent.Telephone.Management
                 services.AddTransient<Audio2TextHandler>();
                 services.AddTransient<DialogueHandler>();
                 services.AddTransient<Text2AudioHandler>();
+                services.AddTransient<AudioProcessorHandler>();
                 services.AddTransient<AudioSendHandler>();
                 services.AddSingleton<HandlerManager>();
             });
@@ -52,9 +53,7 @@ namespace Agent.Telephone.Management
             return this.BuildHandlersAsync(deviceContext, answerRequest: null);
         }
 
-        private async Task<bool> BuildHandlersAsync(
-            DeviceContext deviceContext,
-            SIPRequest? answerRequest)
+        private async Task<bool> BuildHandlersAsync(DeviceContext deviceContext, SIPRequest? answerRequest)
         {
             ActiveCallContext? activeCallContext = deviceContext.ActiveCall;
             if (activeCallContext is null)
@@ -71,6 +70,7 @@ namespace Agent.Telephone.Management
             var audio2Text = this.ServiceProvider.GetRequiredService<Audio2TextHandler>();
             var dialogue = this.ServiceProvider.GetRequiredService<DialogueHandler>();
             var text2Audio = this.ServiceProvider.GetRequiredService<Text2AudioHandler>();
+            var audioProcessor = this.ServiceProvider.GetRequiredService<AudioProcessorHandler>();
             var audioSend = this.ServiceProvider.GetRequiredService<AudioSendHandler>();
 
             IDictionary<string, IHandler> handlerContainer = new Dictionary<string, IHandler>
@@ -80,15 +80,16 @@ namespace Agent.Telephone.Management
                 [audio2Text.HandlerName] = audio2Text,
                 [dialogue.HandlerName] = dialogue,
                 [text2Audio.HandlerName] = text2Audio,
+                [audioProcessor.HandlerName] = audioProcessor,
                 [audioSend.HandlerName] = audioSend
             };
 
-            HandlerResourcesLifetime? resources = null;
+            HandlerPipelineLifetime? pipelineLifetime = null;
             try
             {
                 if (activeCallHandler is not null)
                 {
-                    this.InitializeDeviceContext(deviceContext, activeCallHandler);
+                    this.InitializeActiveCallContext(activeCallContext, activeCallHandler);
                     if (!activeCallHandler.Build())
                     {
                         this.Logger.LogError(
@@ -103,7 +104,7 @@ namespace Agent.Telephone.Management
 
                 foreach (IHandler handler in handlerContainer.Values)
                 {
-                    this.InitializeDeviceContext(deviceContext, handler);
+                    this.InitializeActiveCallContext(activeCallContext, handler);
                     if (!handler.Build())
                     {
                         this.Logger.LogError("无法为设备 {deviceId} 构建处理程序管道。", deviceContext.DeviceId);
@@ -121,18 +122,17 @@ namespace Agent.Telephone.Management
                 this.BuildHandlersWorkflow(audioReceived, audio2Text, completeWriters, handlerTasks);
                 this.BuildHandlersWorkflow(audio2Text, dialogue, completeWriters, handlerTasks);
                 this.BuildHandlersWorkflow(dialogue, text2Audio, completeWriters, handlerTasks);
-                this.BuildHandlersWorkflow(text2Audio, audioSend, completeWriters, handlerTasks);
-                resources = new HandlerResourcesLifetime(
-                    handlerContainer.Values.ToArray(),
-                    new HandlerPipelineLifetime(completeWriters, handlerTasks, this.Logger));
-                activeCallContext.AIAgentContext.RegisterOwnedResource(resources);
-                resources = null;
+                this.BuildHandlersWorkflow(text2Audio, audioProcessor, completeWriters, handlerTasks);
+                this.BuildHandlersWorkflow(audioProcessor, audioSend, completeWriters, handlerTasks);
+                pipelineLifetime = new HandlerPipelineLifetime(handlerContainer.Values.ToArray(), completeWriters, handlerTasks, this.Logger);
+                activeCallContext.AIAgentContext.RegisterOwnedResource(pipelineLifetime);
+                pipelineLifetime = null;
             }
             catch (Exception exception)
             {
-                if (resources is not null)
+                if (pipelineLifetime is not null)
                 {
-                    resources.Dispose();
+                    pipelineLifetime.Dispose();
                 }
                 else
                 {
@@ -164,39 +164,9 @@ namespace Agent.Telephone.Management
             return answered;
         }
 
-        private sealed class HandlerResourcesLifetime : IDisposable
+        private void InitializeActiveCallContext(ActiveCallContext activeCallContext, IHandler handler)
         {
-            private IReadOnlyList<IHandler>? _handlers;
-            private HandlerPipelineLifetime? _pipeline;
-
-            public HandlerResourcesLifetime(
-                IReadOnlyList<IHandler> handlers,
-                HandlerPipelineLifetime pipeline)
-            {
-                this._handlers = handlers;
-                this._pipeline = pipeline;
-            }
-
-            public void Dispose()
-            {
-                Interlocked.Exchange(ref this._pipeline, null)?.Dispose();
-                IReadOnlyList<IHandler>? handlers =
-                    Interlocked.Exchange(ref this._handlers, null);
-                if (handlers is null)
-                {
-                    return;
-                }
-
-                for (int index = handlers.Count - 1; index >= 0; index--)
-                {
-                    handlers[index].Dispose();
-                }
-            }
-        }
-
-        private void InitializeDeviceContext(DeviceContext deviceContext, IHandler handler)
-        {
-            handler.DeviceContext = deviceContext;
+            handler.ActiveCallContext = activeCallContext;
         }
 
         private void BuildHandlersWorkflow<T>(
@@ -220,47 +190,5 @@ namespace Agent.Telephone.Management
             this.Logger?.LogDebug("已构建处理程序工作流，上一步：{previous} -> 下一步：{next}", previous.GetType().Name, next.GetType().Name);
         }
 
-        private sealed class HandlerPipelineLifetime : IDisposable
-        {
-            private IReadOnlyList<Action>? _completeWriters;
-            private readonly IReadOnlyList<Task> _handlerTasks;
-            private readonly ILogger _logger;
-
-            public HandlerPipelineLifetime(
-                IReadOnlyList<Action> completeWriters,
-                IReadOnlyList<Task> handlerTasks,
-                ILogger logger)
-            {
-                this._completeWriters = completeWriters;
-                this._handlerTasks = handlerTasks;
-                this._logger = logger;
-            }
-
-            public void Dispose()
-            {
-                IReadOnlyList<Action>? completeWriters =
-                    Interlocked.Exchange(ref this._completeWriters, null);
-                if (completeWriters is null)
-                {
-                    return;
-                }
-
-                foreach (Action complete in completeWriters)
-                {
-                    complete();
-                }
-
-                try
-                {
-                    Task.WhenAll(this._handlerTasks).GetAwaiter().GetResult();
-                }
-                catch (Exception exception)
-                {
-                    this._logger.LogError(
-                        exception,
-                        "等待通话 Handler 后台管线结束时失败。");
-                }
-            }
-        }
     }
 }

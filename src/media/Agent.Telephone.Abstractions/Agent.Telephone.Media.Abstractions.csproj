@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+	<Version>0.0.1</Version>
+	<Authors>mm7h</Authors>
+	<Title>Agent.Telephone.Media.Abstractions</Title>
+	<RepositoryUrl>https://github.com/mm7h/Agent.Telephone</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/mm7h/Agent.Telephone</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Agent.Telephone.Abstractions\Agent.Telephone.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

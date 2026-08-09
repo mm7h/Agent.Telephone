@@ -35,24 +35,19 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
         public override bool Build()
         {
-            if (this.DeviceContext.ActiveCall is null)
-            {
-                this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法构建处理器。", this.DeviceContext.DeviceId);
-                return false;
-            }
-            PrivateProvider privateProvider = this.DeviceContext.ActiveCall.AIAgentContext.PrivateProvider;
+            PrivateProvider privateProvider = this.ActiveCallContext.AIAgentContext.PrivateProvider;
             if (privateProvider.Llm is null)
             {
-                this.Logger.LogError("设备 {deviceId} 未配置 LLM 提供程序。", this.DeviceContext.DeviceId);
+                this.Logger.LogError("设备 {deviceId} 未配置 LLM 提供程序。", this.ActiveCallContext.DeviceId);
                 return false;
             }
             this._llm = privateProvider.Llm;
-            this._llm.RegisterDevice(this.DeviceContext.DeviceId);
+            this._llm.RegisterDevice(this.ActiveCallContext.DeviceId);
             this._llm.OnBeforeTokenGenerate += this.OnBeforeTokenGenerate;
             this._llm.OnTokenGenerating += this.OnTokenGenerating;
             this._llm.OnTokenGenerated += this.OnTokenGenerated;
 
-            this.RegisterCancellationToken(this.DeviceContext, continueAfterCallEnded: true);
+            this.RegisterCancellationToken(this.ActiveCallContext, continueAfterCallEnded: true);
             return true;
         }
 
@@ -80,7 +75,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
             if (this._llm is null)
             {
-                this.Logger.LogError("LLM提供程序未为设备配置: {deviceId}。", this.DeviceContext.DeviceId);
+                this.Logger.LogError("LLM提供程序未为设备配置: {deviceId}。", this.ActiveCallContext.DeviceId);
                 return;
             }
 
@@ -91,11 +86,11 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             catch (OperationCanceledException)
             {
-                this.Logger.LogDebug("LLM 对话已取消，设备 {DeviceId}", this.DeviceContext.DeviceId);
+                this.Logger.LogDebug("LLM 对话已取消，设备 {DeviceId}", this.ActiveCallContext.DeviceId);
             }
             catch (Exception exception)
             {
-                this.Logger.LogError(exception, "处理来自设备的LLM对话失败: {deviceId}。", this.DeviceContext.DeviceId);
+                this.Logger.LogError(exception, "处理来自设备的LLM对话失败: {deviceId}。", this.ActiveCallContext.DeviceId);
             }
         }
         private void OnBeforeTokenGenerate()
@@ -155,7 +150,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 this._llm.OnBeforeTokenGenerate -= this.OnBeforeTokenGenerate;
                 this._llm.OnTokenGenerating -= this.OnTokenGenerating;
                 this._llm.OnTokenGenerated -= this.OnTokenGenerated;
-                this._llm.UnregisterDevice(this.DeviceContext.DeviceId);
+                this._llm.UnregisterDevice(this.ActiveCallContext.DeviceId);
             }
             this.NextWriter?.TryComplete();
             base.Dispose();

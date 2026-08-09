@@ -2,6 +2,7 @@
 using Agent.Telephone.Common.BuildConfigs;
 using Agent.Telephone.Helpers;
 using Agent.Telephone.Resources;
+using IAudioEditor = Agent.Telephone.Media.Abstractions.IAudioEditor;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 

@@ -19,7 +19,7 @@ namespace Agent.Telephone.Providers.CallControl
         private readonly FunctionToolManager _functionToolManager;
         private readonly ProviderManager _providerManager;
         private readonly HandlerManager _handlerManager;
-        private readonly IAudioEditor _audioEditor;
+        private readonly IAudioPromptPlayer _audioPromptPlayer;
 
         private List<AssistantConfig> _assistantConfigs;
 
@@ -27,13 +27,13 @@ namespace Agent.Telephone.Providers.CallControl
             FunctionToolManager functionToolManager,
             ProviderManager providerManager,
             HandlerManager handlerManager,
-            IAudioEditor audioEditor,
+            IAudioPromptPlayer audioPromptPlayer,
             ILogger<AssistantRoleControl> logger) : base(logger)
         {
             this._functionToolManager = functionToolManager;
             this._providerManager = providerManager;
             this._handlerManager = handlerManager;
-            this._audioEditor = audioEditor;
+            this._audioPromptPlayer = audioPromptPlayer;
             this._assistantConfigs = [];
         }
 
@@ -149,11 +149,12 @@ namespace Agent.Telephone.Providers.CallControl
                     currentActiveCall.CallToken,
                     cancellationToken);
 
-            Task<bool> ringbackTask = this._audioEditor
+            Task<bool> ringbackTask = this._audioPromptPlayer
                 .PlaySIPCodeAudioLoopAsync(
                     SIPResponseStatusCodesEnum.Ringing,
                     currentActiveCall.VoIPRTP,
                     currentActiveCall.NegotiatedAudioFormat,
+                    currentActiveCall.PacketTimeMs,
                     ringbackCts.Token);
             bool ringbackStopped = false;
             bool sessionReplaced = false;
@@ -281,10 +282,11 @@ namespace Agent.Telephone.Providers.CallControl
             try
             {
                 activeCall.MarkPlayingPrompt();
-                await this._audioEditor.PlaySIPCodeAudioAsync(
+                await this._audioPromptPlayer.PlaySIPCodeAudioAsync(
                     SIPResponseStatusCodesEnum.TemporarilyUnavailable,
                     activeCall.VoIPRTP,
                     activeCall.NegotiatedAudioFormat,
+                    activeCall.PacketTimeMs,
                     activeCall.CallToken);
             }
             catch (Exception exception)

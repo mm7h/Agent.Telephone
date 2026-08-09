@@ -4,6 +4,7 @@ using Agent.Telephone.Common.Enums;
 using Agent.Telephone.Helpers;
 using Agent.Telephone.Providers.TTS.Huoshan.Protocols.Models;
 using Agent.Telephone.Resources;
+using IAudioEditor = Agent.Telephone.Media.Abstractions.IAudioEditor;
 using Flurl.Http;
 using Flurl.Http.Configuration;
 using Microsoft.Extensions.Logging;

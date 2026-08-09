@@ -1,54 +1,48 @@
 ﻿using System.Collections.Concurrent;
 using Agent.Telephone.Common.BuildConfigs;
 using Agent.Telephone.Common.Constants;
+using Agent.Telephone.Helpers;
+using Agent.Telephone.Media.Abstractions;
 using Microsoft.Extensions.Logging;
-using SIPSorcery.Media;
 using SIPSorcery.SIP;
-using SIPSorceryMedia.Abstractions;
-using SIPSorceryMedia.FFmpeg;
-using ISIPSorceryAudioCodec = SIPSorcery.Media.AudioEncoder;
 
 namespace Agent.Telephone.Resources.AudioFileCaching
 {
-    internal class DefaultAudioFileCaching : BaseResource<DefaultAudioFileCaching, AudioFileCachingBuildConfig>, IAudioFileCaching
+    internal sealed class DefaultAudioFileCaching : BaseResource<DefaultAudioFileCaching, AudioFileCachingBuildConfig>, IAudioFileCaching
     {
-        private const string END_OF_FILE = "End of file";
-        private static readonly TimeSpan s_fileDecodeTimeout = TimeSpan.FromSeconds(180);
-        private readonly ISIPSorceryAudioCodec _audioCodec;
-        private readonly IDictionary<SIPResponseStatusCodesEnum, byte[]> _audioFileCache = new ConcurrentDictionary<SIPResponseStatusCodesEnum, byte[]>();
-        private AudioFormat _supportedAudioFormat = AudioFormat.Empty;
+        private const int CachedSampleRate = 8000;
+        private readonly IDictionary<SIPResponseStatusCodesEnum, byte[]> _audioFileCache =
+            new ConcurrentDictionary<SIPResponseStatusCodesEnum, byte[]>();
+        private readonly Func<IUrlAudioPlayer> _audioPlayerFactory;
 
-        public DefaultAudioFileCaching(ISIPSorceryAudioCodec audioCodec, ILogger<DefaultAudioFileCaching> logger) : base(logger)
+        public DefaultAudioFileCaching(
+            Func<IUrlAudioPlayer> audioPlayerFactory,
+            ILogger<DefaultAudioFileCaching> logger)
+            : base(logger)
         {
-            this._audioCodec = audioCodec;
+            this._audioPlayerFactory = audioPlayerFactory;
         }
 
         public override string ResourceName => nameof(DefaultAudioFileCaching);
-
 
         public override bool Load(AudioFileCachingBuildConfig settings)
         {
             try
             {
-                foreach (KeyValuePair<int, string> kvp in settings.PromptMediaConfigs)
+                foreach (KeyValuePair<int, string> promptMedia in settings.PromptMediaConfigs)
                 {
-                    // 空路径表示该提示音未配置，属于可选提示音，跳过即可。
-                    if (string.IsNullOrWhiteSpace(kvp.Value))
+                    if (string.IsNullOrWhiteSpace(promptMedia.Value))
                     {
                         continue;
                     }
 
-                    if (this._supportedAudioFormat.IsEmpty())
+                    if (!this.CacheAudioFile(settings.PromptMediaPath, (SIPResponseStatusCodesEnum)promptMedia.Key, promptMedia.Value))
                     {
-                        this._supportedAudioFormat = SupportedAudioFormats
-                            .SupportedSDPAudioFormat
-                            .First(format => format.Codec == AudioCodecsEnum.PCMU);
-                    }
-
-                    if (!this.CacheAudioFile(settings.PromptMediaPath, (SIPResponseStatusCodesEnum)kvp.Key, kvp.Value))
-                    {
-                        this.Logger.LogWarning("音频文件 {FileName} 缓存失败。", kvp.Value);
                         return false;
+                    }
+                    else
+                    {
+                        this.Logger.LogInformation("已加载音频文件：{fileName}", Path.GetFileName(promptMedia.Value));
                     }
                 }
 
@@ -56,7 +50,7 @@ namespace Agent.Telephone.Resources.AudioFileCaching
             }
             catch (Exception exception)
             {
-                this.Logger.LogError(exception, "加载音频文件缓存失败。");
+                this.Logger.LogError(exception, "加载提示音缓存失败。");
                 return false;
             }
         }
@@ -68,9 +62,13 @@ namespace Agent.Telephone.Resources.AudioFileCaching
                 return true;
             }
 
-            this.Logger.LogWarning("SIP code {SipCode} 未缓存对应的音频文件数据。", sipCode);
             audioBytes = null;
             return false;
+        }
+
+        public override void Dispose()
+        {
+            this._audioFileCache.Clear();
         }
 
         private bool CacheAudioFile(string promptMediaPath, SIPResponseStatusCodesEnum cacheKey, string fileName)
@@ -82,58 +80,42 @@ namespace Agent.Telephone.Resources.AudioFileCaching
                 return false;
             }
 
-            FFmpegFileSource source = new FFmpegFileSource(filePath, false, this._audioCodec, 160, false);
-            ConcurrentQueue<byte[]> audioSegments = new ConcurrentQueue<byte[]>();
-            TaskCompletionSource completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            void OnRawSample(AudioSamplingRatesEnum samplingRate, uint duration, short[] sample)
+            using IUrlAudioPlayer player = this._audioPlayerFactory();
+            ConcurrentQueue<byte[]> frames = new();
+            void OnAudioData(float[] audioData, bool _, bool __)
             {
-                short[] resampled = PcmResampler.Resample(sample, (int)samplingRate, this._supportedAudioFormat.ClockRate);
-                byte[] pcmBytes = new byte[resampled.Length * sizeof(short)];
-                Buffer.BlockCopy(resampled, 0, pcmBytes, 0, pcmBytes.Length);
-                audioSegments.Enqueue(pcmBytes);
+                short[] pcm16 = audioData.PcmFloatToShort();
+                byte[] bytes = new byte[pcm16.Length * sizeof(short)];
+                Buffer.BlockCopy(pcm16, 0, bytes, 0, bytes.Length);
+                frames.Enqueue(bytes);
             }
 
-            void OnSourceError(string error)
-            {
-                if (string.Equals(error, END_OF_FILE, StringComparison.OrdinalIgnoreCase))
-                {
-                    completion.TrySetResult();
-                }
-                else
-                {
-                    completion.TrySetException(new InvalidOperationException($"FFmpeg audio source failed: {error}"));
-                }
-            }
-
-            source.OnAudioSourceRawSample += OnRawSample;
-            source.OnAudioSourceError += OnSourceError;
+            player.OnAudioDataAvailable += OnAudioData;
             try
             {
-                source.RestrictFormats(format => format.Codec == this._supportedAudioFormat.Codec);
-                source.SetAudioSourceFormat(this._supportedAudioFormat);
-                Task startAudio = source.StartAudio();
-                Task.WhenAll(startAudio, completion.Task)
-                    .WaitAsync(s_fileDecodeTimeout)
-                    .GetAwaiter()
-                    .GetResult();
-
-                int totalLength = audioSegments.Sum(segment => segment.Length);
-                byte[] cachedAudio = new byte[totalLength];
-                int offset = 0;
-                foreach (byte[] segment in audioSegments)
+                if (!player.CheckFFmpegInstalledAsync().GetAwaiter().GetResult() ||
+                    !player.LoadAsync(
+                            filePath,
+                            CachedSampleRate,
+                            outputChannels: 1,
+                            AudioProcessSettings.DefaultPacketTimeMs)
+                        .GetAwaiter()
+                        .GetResult())
                 {
-                    Buffer.BlockCopy(segment, 0, cachedAudio, offset, segment.Length);
-                    offset += segment.Length;
+                    this.Logger.LogWarning("音频文件 {FilePath} 无法解析。", filePath);
+                    return false;
+                }
+
+                player.PlayAsync().GetAwaiter().GetResult();
+                byte[] cachedAudio = frames.SelectMany(static frame => frame).ToArray();
+                if (cachedAudio.Length == 0)
+                {
+                    this.Logger.LogWarning("音频文件 {FilePath} 未产生 PCM 数据。", filePath);
+                    return false;
                 }
 
                 this._audioFileCache[cacheKey] = cachedAudio;
                 return true;
-            }
-            catch (TimeoutException)
-            {
-                this.Logger.LogWarning("缓存音频文件 {FilePath} 超时，最大解析时长为 {TimeoutSeconds} 秒。", filePath, s_fileDecodeTimeout.TotalSeconds);
-                return false;
             }
             catch (Exception exception)
             {
@@ -142,24 +124,8 @@ namespace Agent.Telephone.Resources.AudioFileCaching
             }
             finally
             {
-                source.OnAudioSourceRawSample -= OnRawSample;
-                source.OnAudioSourceError -= OnSourceError;
-                try
-                {
-                    source.CloseAudio().GetAwaiter().GetResult();
-                }
-                catch (Exception exception)
-                {
-                    this.Logger.LogDebug(exception, "关闭 FFmpeg 音频源 {FilePath} 时发生异常。", filePath);
-                }
-
-                source.Dispose();
+                player.OnAudioDataAvailable -= OnAudioData;
             }
-        }
-
-        public override void Dispose()
-        {
-            this._audioFileCache.Clear();
         }
     }
 }

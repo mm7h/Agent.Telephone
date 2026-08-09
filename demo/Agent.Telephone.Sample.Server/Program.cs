@@ -38,6 +38,10 @@ try
             // 添加自定义函数工具
             .WithFunctionTools<GetTime>()
             .WithPrivateFunctionTools<GetWeather>()
+            // 多媒体文件格式支持
+            .WithMedia(
+                useFFmpegAudioMixer: true,
+                ffmpegPath: config.SIPConfig.FFmpegPath)
             // 构建服务引擎
             .Build();
 

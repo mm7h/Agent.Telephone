@@ -31,12 +31,7 @@ namespace Agent.Telephone.Handlers.SIPHandlers
 
         public override bool Build()
         {
-            if (this.DeviceContext.ActiveCall is null)
-            {
-                this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法建立 RTP 上下文。", this.DeviceContext.DeviceId);
-                return false;
-            }
-            this._rtpContext = this.DeviceContext.ActiveCall.VoIPRTP;
+            this._rtpContext = this.ActiveCallContext.VoIPRTP;
             this._rtpContext.OnRtpPacketReceived += this.OnRtpPacketReceivedAsync;
             this._rtpContext.OnAudioFormatsNegotiated += this.OnAudioFormatsNegotiated;
             return true;
@@ -50,12 +45,7 @@ namespace Agent.Telephone.Handlers.SIPHandlers
                 return;
             }
 
-            ActiveCallContext? activeCall = this.DeviceContext.ActiveCall;
-            if (activeCall is null)
-            {
-                this.Logger.LogWarning("设备 {deviceId} 收到 RTP 包，但未找到活动呼叫上下文。", this.DeviceContext.DeviceId);
-                return;
-            }
+            ActiveCallContext activeCall = this.ActiveCallContext;
 
             if (activeCall.IsAgentMediaPaused)
             {
@@ -68,7 +58,7 @@ namespace Agent.Telephone.Handlers.SIPHandlers
                 return;
             }
             var workflow = this._rtpPacketWorkflowPool.Get();
-            workflow.Initialize(this.DeviceContext, rtpPacket.Payload);
+            workflow.Initialize(this.ActiveCallContext, rtpPacket.Payload);
             try
             {
                 await this.NextWriter.WriteAsync(workflow, this.HandlerToken);
@@ -81,14 +71,7 @@ namespace Agent.Telephone.Handlers.SIPHandlers
 
         private void OnAudioFormatsNegotiated(List<AudioFormat> audioFormats)
         {
-            if (this.DeviceContext.ActiveCall is not null)
-            {
-                this.DeviceContext.ActiveCall.NegotiatedAudioFormat = audioFormats.FirstOrDefault(format => SupportedAudioFormats.SupportedAudioCodecs.Contains(format.Codec));
-            }
-            else
-            { 
-                this.Logger.LogWarning("设备 {deviceId} 的音频格式协商完成，但未找到活动呼叫上下文。", this.DeviceContext.DeviceId);
-            }
+            this.ActiveCallContext.NegotiatedAudioFormat = audioFormats.FirstOrDefault(format => SupportedAudioFormats.SupportedAudioCodecs.Contains(format.Codec));
         }
 
         public override void Dispose()

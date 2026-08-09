@@ -78,7 +78,7 @@ public sealed class DefaultCallControllerTests
             functionToolManager: null!,
             providerManager: null!,
             handlerManager: null!,
-            audioEditor: null!,
+            audioPromptPlayer: null!,
             NullLogger<AssistantRoleControl>.Instance);
         Assert.True(controller.Build(CreateConfig().AssistantConfigs));
         return controller;

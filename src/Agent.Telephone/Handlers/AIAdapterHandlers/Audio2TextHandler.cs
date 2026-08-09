@@ -29,21 +29,16 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
         public override bool Build()
         {
-            if (this.DeviceContext.ActiveCall is null)
-            {
-                this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法构建处理器。", this.DeviceContext.DeviceId);
-                return false;
-            }
-            PrivateProvider privateProvider = this.DeviceContext.ActiveCall.AIAgentContext.PrivateProvider;
+            PrivateProvider privateProvider = this.ActiveCallContext.AIAgentContext.PrivateProvider;
             if (privateProvider.Asr is null)
             {
-                this.Logger.LogError("设备 {deviceId} 未配置 ASR 提供程序。", this.DeviceContext.DeviceId);
+                this.Logger.LogError("设备 {deviceId} 未配置 ASR 提供程序。", this.ActiveCallContext.DeviceId);
                 return false;
             }
             this._asr = privateProvider.Asr;
-            this._asr.RegisterDevice(this.DeviceContext.DeviceId, this);
+            this._asr.RegisterDevice(this.ActiveCallContext.DeviceId, this);
 
-            this.RegisterCancellationToken(this.DeviceContext);
+            this.RegisterCancellationToken(this.ActiveCallContext);
             return true;
         }
 
@@ -70,7 +65,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             if (this._asr is null)
             {
-                this.Logger.LogError("ASR提供程序未为设备配置: {deviceId}。", this.DeviceContext.DeviceId);
+                this.Logger.LogError("ASR提供程序未为设备配置: {deviceId}。", this.ActiveCallContext.DeviceId);
                 return;
             }
 
@@ -80,11 +75,11 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             catch (OperationCanceledException)
             {
-                this.Logger.LogDebug("ASR 处理已取消，设备 {DeviceId}", this.DeviceContext.DeviceId);
+                this.Logger.LogDebug("ASR 处理已取消，设备 {DeviceId}", this.ActiveCallContext.DeviceId);
             }
             catch (Exception ex)
             {
-                this.Logger.LogError(ex, "处理来自设备 {deviceId} 的语音转文本数据包失败。", this.DeviceContext.DeviceId);
+                this.Logger.LogError(ex, "处理来自设备 {deviceId} 的语音转文本数据包失败。", this.ActiveCallContext.DeviceId);
             }
         }
 
@@ -98,16 +93,10 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             if (string.IsNullOrWhiteSpace(text))
             {
                 // todo
-                //this.DeviceContext.Reset();
-                this.Logger.LogDebug("设备 {deviceId} 未检测到语音。", this.DeviceContext.DeviceId);
+                this.Logger.LogDebug("设备 {deviceId} 未检测到语音。", this.ActiveCallContext.DeviceId);
                 return;
             }
-            if (this.DeviceContext.ActiveCall is null)
-            {
-                this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法转换语音到文本。", this.DeviceContext.DeviceId);
-                return;
-            }
-            this.Logger.LogDebug("设备 {deviceId} 检测到语音文本: {text}", this.DeviceContext.DeviceId, text);
+            this.Logger.LogDebug("设备 {deviceId} 检测到语音文本: {text}", this.ActiveCallContext.DeviceId, text);
             this.ActiveCallContext.RestartTurn();
             Workflow<string> workflow = this._textWorkflowPool.Get();
             workflow.Initialize(this.ActiveCallContext, text);
@@ -133,7 +122,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         {
             if (this._asr is not null)
             {
-                this._asr.UnregisterDevice(this.DeviceContext.DeviceId);
+                this._asr.UnregisterDevice(this.ActiveCallContext.DeviceId);
             }
             this.NextWriter?.TryComplete();
             base.Dispose();

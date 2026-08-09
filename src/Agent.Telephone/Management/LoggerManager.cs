@@ -13,6 +13,11 @@ namespace Agent.Telephone.Management
         {
             return builder.ConfigureLogging((context, loggerBuilder) =>
             {
+#if !DEBUG
+                loggerBuilder.AddFilter("Agent.Telephone.Media", LogLevel.None);
+                loggerBuilder.AddFilter("Agent.Telephone.Media.Abstractions", LogLevel.None);
+#endif
+
                 LogSetting logSetting = config.LogSetting;
                 LoggingLevelSwitch levelSwitch = new LoggingLevelSwitch();
                 levelSwitch.MinimumLevel = ConvertLogLevel(logSetting.LogLevel);

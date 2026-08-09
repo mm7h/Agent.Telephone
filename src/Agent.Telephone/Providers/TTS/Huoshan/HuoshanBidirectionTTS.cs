@@ -4,6 +4,7 @@ using Agent.Telephone.Common.Exceptions;
 using Agent.Telephone.Helpers;
 using Agent.Telephone.Providers.TTS.Huoshan.Protocols.Enums;
 using Agent.Telephone.Resources;
+using IAudioEditor = Agent.Telephone.Media.Abstractions.IAudioEditor;
 using Microsoft.Extensions.Logging;
 
 namespace Agent.Telephone.Providers.TTS.Huoshan

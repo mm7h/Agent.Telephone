@@ -2,6 +2,7 @@
 using SherpaOnnx;
 using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Resources;
+using IAudioEditor = Agent.Telephone.Media.Abstractions.IAudioEditor;
 
 namespace Agent.Telephone.Providers.ASR.Sherpa
 {

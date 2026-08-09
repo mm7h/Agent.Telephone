@@ -11,7 +11,7 @@ namespace Agent.Telephone.Providers.OfflineDialogue
     internal sealed class OfflineDialogueProvider : BaseProvider<OfflineDialogueProvider, ModelSetting>, IOfflineDialogue
     {
         private readonly IMessageStore _messageStore;
-        private readonly IAudioEditor _audioEditor;
+        private readonly IAudioPromptPlayer _audioPromptPlayer;
         private readonly CancellationTokenSource _stopping = new();
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, MessageRecord>> _messagesByTurn = new();
         private readonly ConcurrentDictionary<string, bool> _turnPlaybackResults = new();
@@ -21,12 +21,12 @@ namespace Agent.Telephone.Providers.OfflineDialogue
 
         public OfflineDialogueProvider(
             IMessageStore messageStore,
-            IAudioEditor audioEditor,
+            IAudioPromptPlayer audioPromptPlayer,
             ILogger<OfflineDialogueProvider> logger)
             : base(logger)
         {
             this._messageStore = messageStore;
-            this._audioEditor = audioEditor;
+            this._audioPromptPlayer = audioPromptPlayer;
         }
 
         public override string ProviderType => "offline-dialogue";
@@ -180,10 +180,11 @@ namespace Agent.Telephone.Providers.OfflineDialogue
                         playbackCts.Token);
                     foreach (MessageRecord message in messages)
                     {
-                        bool played = await this._audioEditor.PlayFileAsync(
+                        bool played = await this._audioPromptPlayer.PlayFileAsync(
                             message.AudioPath,
                             activeCall.VoIPRTP,
                             activeCall.NegotiatedAudioFormat,
+                            activeCall.PacketTimeMs,
                             playbackCts.Token);
                         if (!played)
                         {
