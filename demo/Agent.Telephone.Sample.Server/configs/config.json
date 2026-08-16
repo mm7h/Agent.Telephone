@@ -58,13 +58,11 @@
       "Prompt": "AssistantPrompts/10085.md",
       "VAD": "SileroNative",
       "ASR": "SenseVoice",
-      "Intent": "IntentLlm",
+      "Intent": "IntentLlm", // 如果要使用按键回馈来触发自定义function tool，则必须使用`FunctionCall`类型
       "LLM": "Qwen",
       "TTS": "HuoshanBidirection",
       "Memory": "FlashMemory",
-      "AllowedTools": [
-        "GetWeatherInfo"
-      ]
+      "AllowedTools": []
     }
   ],
   "ModelConfig": {
@@ -133,7 +131,7 @@
         "Qwen": {
           "BaseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
           "ApiKey": "to your llm api key",
-          "ModelName": "qwen-flash"
+          "ModelName": "qwen3.7-max"
         }
       },
       "TTS": {

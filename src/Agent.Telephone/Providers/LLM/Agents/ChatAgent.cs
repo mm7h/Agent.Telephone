@@ -64,17 +64,22 @@ namespace Agent.Telephone.Providers.LLM.Agents
                 IChatClient chatClient = this.ServiceProvider.GetRequiredKeyedService<IChatClient>($"LLM_{agentBuildConfig.AgentSetting.ModelName}");
 
 
+                ChatOptions chatOptions = new ChatOptions
+                {
+                    Instructions = instructions,
+                    Temperature = 0.5f,
+                    MaxOutputTokens = 40,
+                };
+                if (!this._allowFunctionCall)
+                {
+                    chatOptions.ResponseFormat = ChatResponseFormat.Text;
+                }
+
                 ChatClientAgentOptions chatClientAgentOptions = new ChatClientAgentOptions
                 {
                     Name = SubAgentNames.ChatAgent,
                     Description = $"the agent of {SubAgentNames.ChatAgent}",
-                    ChatOptions = new ChatOptions
-                    {
-                        Instructions = instructions,
-                        Temperature = 0.5f,
-                        MaxOutputTokens = 40,
-                        ResponseFormat = ChatResponseFormat.Text
-                    }
+                    ChatOptions = chatOptions
                 };
 
                 this._chatClientAgent = new ChatClientAgent(
@@ -177,6 +182,11 @@ namespace Agent.Telephone.Providers.LLM.Agents
 
             ChatClientAgentRunOptions runOptions = new ChatClientAgentRunOptions(new ChatOptions
             {
+                Reasoning = new ReasoningOptions
+                {
+                    Effort = ReasoningEffort.None,
+                    Output = ReasoningOutput.None
+                },
                 ToolMode = this._allowFunctionCall ? ChatToolMode.Auto : ChatToolMode.None,
                 Tools = (this._allowFunctionCall && this._sessionPrivateProvider?.FunctionTools.Count > 0)
                     ? this._sessionPrivateProvider.FunctionTools

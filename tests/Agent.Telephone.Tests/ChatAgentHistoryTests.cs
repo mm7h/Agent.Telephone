@@ -14,6 +14,44 @@ namespace Agent.Telephone.Tests;
 public sealed class ChatAgentHistoryTests
 {
     [Fact]
+    public async Task OmitsTextResponseFormatWhenFunctionCallingAsync()
+    {
+        var chatClient = new CapturingChatClient();
+        ServiceCollection services = new();
+        services.AddKeyedSingleton<IChatClient>("LLM_tool", chatClient);
+        using ServiceProvider serviceProvider = services.BuildServiceProvider();
+        using var agent = new ChatAgent(serviceProvider, NullLogger<ChatAgent>.Instance);
+        var privateProvider = new PrivateProvider("device");
+        privateProvider.FunctionTools.Add(AIFunctionFactory.Create((Func<string>)(static () => "ok")));
+        var config = new LLMAgentBuildConfig(
+            new ModelSetting
+            {
+                ModelName = "tool",
+                Config = new Dictionary<string, string>
+                {
+                    ["Prompt"] = "你是助手。",
+                    ["IntentType"] = "FunctionCall",
+                },
+            },
+            privateProvider);
+
+        Assert.True(agent.Build(config));
+        agent.RegisterDevice("device");
+
+        var stream = (IAsyncEnumerable<string>)typeof(ChatAgent)
+            .GetMethod("StreamLLMResponseAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(agent, ["测试", CancellationToken.None])!;
+        await foreach (string _ in stream)
+        {
+        }
+
+        Assert.NotNull(chatClient.LastOptions);
+        Assert.Equal(ChatToolMode.Auto, chatClient.LastOptions!.ToolMode);
+        Assert.NotEmpty(chatClient.LastOptions.Tools!);
+        Assert.Null(chatClient.LastOptions.ResponseFormat);
+    }
+
+    [Fact]
     public void UsesTheAssignedCallChatHistory()
     {
         ServiceCollection services = new();
@@ -59,6 +97,33 @@ public sealed class ChatAgentHistoryTests
             ChatOptions? options = null,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            await Task.CompletedTask;
+            yield break;
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class CapturingChatClient : IChatClient
+    {
+        public ChatOptions? LastOptions { get; private set; }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<ChatResponse>(new NotSupportedException());
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            this.LastOptions = options;
             await Task.CompletedTask;
             yield break;
         }

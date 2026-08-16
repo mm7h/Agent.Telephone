@@ -12,7 +12,7 @@
     <PackageReference Include="Flurl.Http" Version="4.0.2" />
     <PackageReference Include="Microsoft.Agents.AI" Version="1.17.0" />
     <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.17.0" />
-    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.9.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.7.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
     <PackageReference Include="Microsoft.Extensions.ObjectPool.DependencyInjection" Version="10.9.0" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />

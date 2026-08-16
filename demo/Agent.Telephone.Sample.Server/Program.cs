@@ -48,6 +48,7 @@ try
             // 添加自定义函数工具
             .WithFunctionTools<GetTime>()
             .WithPrivateFunctionTools<GetWeather>()
+            .WithPrivateFunctionTools<AssistantSwitch>()
             // 多媒体文件格式支持
             .WithMedia(
                 useFFmpegAudioMixer: true,

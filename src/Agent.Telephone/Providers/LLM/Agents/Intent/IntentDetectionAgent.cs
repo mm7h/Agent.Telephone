@@ -33,6 +33,7 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
     5. 当 detected 为 false 时，function 字段必须为 null。
     6. 当 detected 为 true 时，function 中的 name 必须与可用函数名完全一致；只有在函数确实需要参数时才返回 parameters。
     7. parameters 必须是参数数组；每个参数对象至少包含 name 和 value；只有在你能明确判断参数类型时才补充 type；不要臆造不存在的参数。
+    8. 当选择的函数存在必填参数时，parameters 必须包含每个必填参数的 name 和 value；无法从用户消息确定任一必填参数时，返回 detected:false，不要输出缺参函数调用。
 
     意图判断规则：
     1. 只有当用户明确想触发某个可用函数时，才设置 detected 为 true；否则 detected 必须为 false。
@@ -143,32 +144,57 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
             string instructions = this.BuildIntentDetectionPrompt(this.BuildToolDescriptions(tools));
             ChatClientAgentRunOptions runOptions = new ChatClientAgentRunOptions(new ChatOptions
             {
-                Instructions = instructions
+                Instructions = instructions,
+                Reasoning = new ReasoningOptions
+                {
+                    Effort = ReasoningEffort.None,
+                    Output = ReasoningOutput.None
+                }
             });
+            AgentResponse<IntentDetectionResult> response = await this._intentClientAgent.RunAsync<IntentDetectionResult>(
+                preInput.UserMessage,
+                serializerOptions: JsonHelper.OPTIONS,
+                options: runOptions,
+                cancellationToken: token);
+
+            if (!TryGetIntentDetectionResult(response, out IntentDetectionResult? detectionResult))
+            {
+                this.Logger.LogWarning("IntentDetectionAgent: LLM 未返回可反序列化的 JSON，回退为无意图结果。");
+                await context.SendMessageAsync(this.CreateEmptyDetectionResult(preInput.UserMessage), token);
+                return;
+            }
+
+            if (detectionResult is null || detectionResult.Function is null)
+            {
+                IntentDetectionResult result = this.CreateEmptyDetectionResult(preInput.UserMessage);
+                this.Logger.LogDebug("IntentDetectionAgent: LLM 没有返回可用结果，已转换为无意图结果。");
+                await context.SendMessageAsync(result, token);
+            }
+            else
+            {
+                this.Logger.LogDebug("IntentDetectionAgent: function={Function}", detectionResult.Function.Name);
+                await context.SendMessageAsync(detectionResult, token);
+            }
+        }
+
+        internal static bool TryGetIntentDetectionResult(
+            AgentResponse<IntentDetectionResult> response,
+            out IntentDetectionResult? detectionResult)
+        {
             try
             {
-                AgentResponse<IntentDetectionResult> response = await this._intentClientAgent.RunAsync<IntentDetectionResult>(
-                    preInput.UserMessage,
-                    serializerOptions: JsonHelper.OPTIONS,
-                    options: runOptions,
-                    cancellationToken: token);
-
-                if (response.Result is null || response.Result.Function is null)
-                {
-                    IntentDetectionResult result = this.CreateEmptyDetectionResult(preInput.UserMessage);
-                    this.Logger.LogDebug("IntentDetectionAgent: LLM 没有返回可用结果，已转换为无意图结果。");
-                    await context.SendMessageAsync(result, token);
-                }
-                else
-                {
-                    this.Logger.LogDebug("IntentDetectionAgent: function={Function}", response.Result.Function.Name);
-                    await context.SendMessageAsync(response.Result, token);
-                }
+                detectionResult = response.Result;
+                return true;
+            }
+            catch (InvalidOperationException exception) when (exception.Message == "The response did not contain JSON to be deserialized.")
+            {
+                detectionResult = null;
+                return false;
             }
             catch (System.Text.Json.JsonException)
             {
-                this.Logger.LogWarning("IntentDetectionAgent: LLM 返回了无效的 JSON（可能被 markdown 包裹），回退为无意图结果。");
-                await context.SendMessageAsync(this.CreateEmptyDetectionResult(preInput.UserMessage), token);
+                detectionResult = null;
+                return false;
             }
         }
 

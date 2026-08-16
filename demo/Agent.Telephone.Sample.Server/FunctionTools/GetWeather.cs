@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Agent.Telephone.Sample.Server.FunctionTools
 {
-    internal class GetWeather : PrivateFunctionTool
+    public class GetWeather : PrivateFunctionTool
     {
         public override ValueTask OnFunctionToolInitializedAsync()
         {

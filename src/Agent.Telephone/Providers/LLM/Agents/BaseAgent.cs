@@ -35,7 +35,7 @@ namespace Agent.Telephone.Providers.LLM.Agents
 
         public virtual void UnregisterDevice(string deviceId)
         {
-            this.Logger.LogInformation("设备 {deviceId} 已经在 {agentName} 注销", this.DeviceId, this.AgentName);
+            this.Logger.LogInformation("设备 {deviceId} 已经在 {agentName} 注销", deviceId, this.AgentName);
             this.DeviceId = string.Empty;
         }
 

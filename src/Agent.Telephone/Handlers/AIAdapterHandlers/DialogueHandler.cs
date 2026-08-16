@@ -101,7 +101,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                         CancellationToken.None);
                     this._turn = turn;
 
-                    await Task.Delay(10 * 1000);
+                    //await Task.Delay(10 * 1000);
 
                     await this._llm.StartDialogueAsync(workflow.Data, this.HandlerToken);
                 }
