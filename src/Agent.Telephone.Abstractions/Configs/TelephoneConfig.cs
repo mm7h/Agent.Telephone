@@ -6,9 +6,9 @@
         {
             this.SIPConfig = default!;
             this.ModelConfig = default!;
+            this.PromptConfig = default!;
             this.AssistantConfigs = [];
             this.LogSetting = new();
-            this.PromptMediaConfigs = new Dictionary<int, string>();
         }
 
         public bool AuthEnabled { get; set; }
@@ -16,8 +16,7 @@
         public SIPConfig SIPConfig { get; set; }
         public List<AssistantConfig> AssistantConfigs { get; set; }
         public ModelConfig ModelConfig { get; set; }
-        public string PromptMediaPath { get; set; } = "./data/prompt-media";
-        public IDictionary<int, string> PromptMediaConfigs { get; set; }
+        public PromptConfig PromptConfig { get; set; }
     }
 
     #region Log

@@ -30,14 +30,12 @@ namespace Agent.Telephone.Providers.LLM.Agents
         public virtual void RegisterDevice(string deviceId)
         {
             this.DeviceId = deviceId;
-            //todo
-            //this.Logger.LogInformation(Lang.BaseProvider_RegisterDevice_Registered, this.DeviceId, this.SessionId, this.ProviderType);
+            this.Logger.LogInformation("设备 {deviceId} 已经在 {agentName} 注册", this.DeviceId, this.AgentName);
         }
 
         public virtual void UnregisterDevice(string deviceId)
         {
-            //todo
-            //this.Logger.LogInformation(Lang.BaseProvider_UnregisterDevice_Unregistered, this.DeviceId, this.SessionId, this.ProviderType);
+            this.Logger.LogInformation("设备 {deviceId} 已经在 {agentName} 注销", this.DeviceId, this.AgentName);
             this.DeviceId = string.Empty;
         }
 
@@ -45,8 +43,7 @@ namespace Agent.Telephone.Providers.LLM.Agents
         {
             if (string.IsNullOrWhiteSpace(this.DeviceId))
             {
-                //todo
-                //this.Logger.LogError(Lang.BaseProvider_CheckDeviceRegistered_NotRegistered, string.IsNullOrWhiteSpace(this.DeviceId) ? "unkonwn" : this.DeviceId, string.IsNullOrWhiteSpace(this.SessionId) ? "unkonwn" : this.SessionId, this.ProviderType);
+                this.Logger.LogWarning("设备 {deviceId} 在 {agentName} 未注册", string.IsNullOrWhiteSpace(deviceId) ? "unkonwn" : deviceId, this.AgentName);
                 return false;
             }
             return true;
@@ -55,17 +52,6 @@ namespace Agent.Telephone.Providers.LLM.Agents
         protected virtual string GenerateId()
         {
             return Guid.NewGuid().ToString("N");
-        }
-
-        protected string ReplaceMacDelimiters(string deviceId, string newDelimiter = "")
-        {
-            if (string.IsNullOrWhiteSpace(deviceId))
-            {
-                //todo
-                throw new ArgumentException("", nameof(deviceId));
-            }
-
-            return Regex.Replace(deviceId, @"[^a-fA-F0-9]", newDelimiter);
         }
     }
 }

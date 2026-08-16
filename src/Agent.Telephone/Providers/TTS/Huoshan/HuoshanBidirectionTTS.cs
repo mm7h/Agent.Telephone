@@ -2,9 +2,8 @@
 using Agent.Telephone.Common.Enums;
 using Agent.Telephone.Common.Exceptions;
 using Agent.Telephone.Helpers;
+using Agent.Telephone.Media.Abstractions;
 using Agent.Telephone.Providers.TTS.Huoshan.Protocols.Enums;
-using Agent.Telephone.Resources;
-using IAudioEditor = Agent.Telephone.Media.Abstractions.IAudioEditor;
 using Microsoft.Extensions.Logging;
 
 namespace Agent.Telephone.Providers.TTS.Huoshan
@@ -13,6 +12,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
     {
         private const string SERVICE_END_POINT = "wss://openspeech.bytedance.com/api/v3/tts/bidirection";
         private const string TTS_NAMESPACE = "BidirectionalTTS";
+        private int _connectionStarted;
 
         public HuoshanBidirectionTTS(IAudioEditor audioEditor, ILogger<HuoshanBidirectionTTS> logger) : base(audioEditor, logger)
         {
@@ -37,6 +37,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             {
                 await this.ConnectAsync(SERVICE_END_POINT, token);
                 await this.StartConnectionAsync(token);
+                Interlocked.Exchange(ref this._connectionStarted, 1);
             }
 
             OutSegment seg = workflow.Data;
@@ -47,6 +48,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
                 return;
             }
 
+            this.StartNewAudioBuffer(seg.SentenceId);
             this.ProcessingSegments.TryAdd(seg.SentenceId, workflow.Data);
 
             this.StreamingActive = true;
@@ -112,6 +114,11 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             {
                 await this.FinishSessionAsync(seg.SentenceId, token);
 
+                if (seg.IsLastSegment)
+                {
+                    await this.FinishActiveConnectionAsync(token);
+                }
+
                 this.TTSEventCallback?.OnProcessed(seg.Content, seg.IsFirstSegment, seg.IsLastSegment, TtsGenerateResult.Success);
             }
             catch (OperationCanceledException)
@@ -133,22 +140,33 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             }
         }
 
-        public override void Dispose()
+        private async Task FinishActiveConnectionAsync(CancellationToken token)
         {
+            if (Interlocked.Exchange(ref this._connectionStarted, 0) == 0)
+            {
+                return;
+            }
+
+            this.StreamingActive = false;
             try
             {
-                this.FinishConnectionAsync(CancellationToken.None).GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                this.Logger.LogDebug(ex, "释放期间 FinishConnection 引发异常。");
+                await this.FinishConnectionAsync(token);
             }
             finally
             {
-                this.FailAllWaits(new OperationCanceledException("TTS 提供程序已释放"));
-                this.ClearAllSessionAudioBuffers();
-                this.TTSEventCallback?.OnProcessed(string.Empty, false, false, TtsGenerateResult.Aborted);
+                if (this.WebSocketClient is not null)
+                {
+                    await this.WebSocketClient.CloseAsync();
+                }
             }
+        }
+
+        public override void Dispose()
+        {
+            this.FailAllWaits(new OperationCanceledException("TTS 提供程序已释放"));
+            this.ClearAudioBuffer();
+            this.WebSocketClient?.Dispose();
+            this.TTSEventCallback?.OnProcessed(string.Empty, false, false, TtsGenerateResult.Aborted);
         }
     }
 }

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Version>0.0.1</Version>
+    <Authors>mm7h</Authors>
+    <Title>Agent.Telephone.Media.Resource</Title>
+    <RepositoryUrl>https://github.com/mm7h/Agent.Telephone</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/mm7h/Agent.Telephone</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="PromptMedia\**\*">
+      <LogicalName>%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Agent.Telephone" />
+  </ItemGroup>
+
+</Project>

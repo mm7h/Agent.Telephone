@@ -2,9 +2,8 @@
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Common.Enums;
 using Agent.Telephone.Helpers;
+using Agent.Telephone.Media.Abstractions;
 using Agent.Telephone.Providers.TTS.Huoshan.Protocols.Models;
-using Agent.Telephone.Resources;
-using IAudioEditor = Agent.Telephone.Media.Abstractions.IAudioEditor;
 using Flurl.Http;
 using Flurl.Http.Configuration;
 using Microsoft.Extensions.Logging;
@@ -158,7 +157,12 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
                     float[] pcmData = audioData.PcmBytesToFloat(16);
                     if (pcmData.Length > 0)
                     {
-                        await this.SaveAudioFileAsync(this.DeviceId, seg.SentenceId, pcmData);
+                        await this.SaveAudioFileAsync(
+                            workflow.DeviceId,
+                            workflow.CallerNumber,
+                            workflow.DialedNumber,
+                            seg.SentenceId,
+                            pcmData);
                         this.TTSEventCallback?.OnProcessing(pcmData, false, false);
                     }
                     this.TTSEventCallback?.OnSentenceEnd(seg.Content, seg.SentenceId);

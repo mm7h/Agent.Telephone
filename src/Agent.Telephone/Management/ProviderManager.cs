@@ -1,5 +1,6 @@
 ﻿using System.ClientModel;
 using Agent.Telephone.Abstractions.Configs;
+using Agent.Telephone.Abstractions.Persistence;
 using Agent.Telephone.Common.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
@@ -44,13 +45,13 @@ namespace Agent.Telephone.Management
             return builder.ConfigureServices((_, services) =>
             {
                 RegisterAudioProcessor(services);
-                RegisterVad(services, config.ModelConfig, GlobalProviderNames.GLOBAL_VAD);
-                RegisterAsr(services, config.ModelConfig, GlobalProviderNames.GLOBAL_ASR);
+                RegisterVad(services, config.ModelConfig);
+                RegisterAsr(services, config.ModelConfig);
                 RegisterLlm(services, config.ModelConfig);
-                RegisterTts(services, config.ModelConfig, GlobalProviderNames.GLOBAL_TTS);
+                RegisterTts(services, config.ModelConfig);
                 RegisterOfflineDialogue(services, config.ModelConfig);
                 RegisterCallControl(services, config.ModelConfig);
-                services.AddTransient<IDtmfInput, DtmfInputProvider>();
+                services.AddTransient<IDtmfInput, DefaultDtmfInput>();
 
                 services.AddSingleton<ProviderManager>();
             });
@@ -60,45 +61,45 @@ namespace Agent.Telephone.Management
         {
             try
             {
-                ICallControl callControl =
-                    this.ServiceProvider.GetRequiredService<ICallControl>();
-                if (!callControl.Build(this.Config.AssistantConfigs))
-                {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", callControl.ModelName);
-                    return false;
-                }
-
-                IOfflineDialogue offlineDialogue = this.ServiceProvider.GetRequiredService<IOfflineDialogue>();
-                if (!offlineDialogue.Build(ModelSetting.Empty))
-                {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", offlineDialogue.ModelName);
-                    return false;
-                }
-
                 #region Vad
-                IVad vad = this.ServiceProvider.GetRequiredKeyedService<IVad>(GlobalProviderNames.GLOBAL_VAD);
-                if (vad.IsSherpaModel && !vad.Build(this.GetSelectedSherpaSetting("VAD", this.Config.ModelConfig)))
+                string selectedVadModel = this.Config.ModelConfig.SelectedDefaultSettings["VAD"];
+                if (SherpaModels.VadModels.Contains(selectedVadModel, StringComparer.OrdinalIgnoreCase))
                 {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", vad.ModelName);
-                    return false;
+                    IVad vad = this.ServiceProvider.GetRequiredKeyedService<IVad>(
+                        ConvertToKebabCase(selectedVadModel));
+                    if (!vad.Build(this.GetSelectedSherpaSetting("VAD", this.Config.ModelConfig)))
+                    {
+                        this.Logger.LogError("无法构建 {modelName} 提供程序。", vad.ModelName);
+                        return false;
+                    }
                 }
                 #endregion
 
                 #region Asr
-                IAsr asr = this.ServiceProvider.GetRequiredKeyedService<IAsr>(GlobalProviderNames.GLOBAL_ASR);
-                if (asr.IsSherpaModel && !asr.Build(this.GetSelectedSherpaSetting("ASR", this.Config.ModelConfig)))
+                string selectedAsrModel = this.Config.ModelConfig.SelectedDefaultSettings["ASR"];
+                if (SherpaModels.AsrModels.Contains(selectedAsrModel, StringComparer.OrdinalIgnoreCase))
                 {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", asr.ModelName);
-                    return false;
+                    IAsr asr = this.ServiceProvider.GetRequiredKeyedService<IAsr>(
+                        ConvertToKebabCase(selectedAsrModel));
+                    if (!asr.Build(this.GetSelectedSherpaSetting("ASR", this.Config.ModelConfig)))
+                    {
+                        this.Logger.LogError("无法构建 {modelName} 提供程序。", asr.ModelName);
+                        return false;
+                    }
                 }
                 #endregion
 
                 #region Tts
-                ITts tts = this.ServiceProvider.GetRequiredKeyedService<ITts>(GlobalProviderNames.GLOBAL_TTS);
-                if (tts.IsSherpaModel && !tts.Build(this.GetSelectedSherpaSetting("TTS", this.Config.ModelConfig)))
+                string selectedTtsModel = this.Config.ModelConfig.SelectedDefaultSettings["TTS"];
+                if (SherpaModels.TtsModels.Contains(selectedTtsModel, StringComparer.OrdinalIgnoreCase))
                 {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", tts.ModelName);
-                    return false;
+                    ITts tts = this.ServiceProvider.GetRequiredKeyedService<ITts>(
+                        ConvertToKebabCase(selectedTtsModel));
+                    if (!tts.Build(this.GetSelectedSherpaSetting("TTS", this.Config.ModelConfig)))
+                    {
+                        this.Logger.LogError("无法构建 {modelName} 提供程序。", tts.ModelName);
+                        return false;
+                    }
                 }
                 #endregion
 
@@ -133,6 +134,9 @@ namespace Agent.Telephone.Management
             IAsr? pendingAsr = null;
             ILlm? pendingLlm = null;
             ITts? pendingTts = null;
+            IOfflineDialogue? pendingOfflineDialogue = null;
+            ICallControl? pendingCallControl = null;
+            IDtmfInput? pendingDtmfInput = null;
             try
             {
                 #region AudioProcessor Build
@@ -175,8 +179,13 @@ namespace Agent.Telephone.Management
                 ModelSetting selectedChatLLMModelSetting = this.GetConfiguredSetting("LLM", activeCall.AssistantConfig.LLM, this.Config.ModelConfig);
                 selectedChatLLMModelSetting.Config.SetConfigValue("IntentType", intentType);
                 selectedChatLLMModelSetting.Config.SetConfigValue("Prompt", activeCall.AssistantConfig.Prompt);
-                pendingLlm = this.ServiceProvider.GetRequiredKeyedService<ILlm>(
-                    ConvertToKebabCase(activeCall.AssistantConfig.LLM));
+                ITelephoneStore telephoneStore = this.ServiceProvider.GetRequiredService<ITelephoneStore>();
+                IReadOnlyList<ConversationMessage> conversationMessages = await telephoneStore.GetConversationMessagesAsync(
+                    activeCall.UserAor,
+                    activeCall.DialedNumber!,
+                    activeCall.CallToken);
+                activeCall.AIAgentContext.LoadPersistedChatHistory(conversationMessages);
+                pendingLlm = this.ServiceProvider.GetRequiredService<ILlm>();
 
                 ModelSetting intentResponseAgentSetting = new ModelSetting
                 {
@@ -227,9 +236,38 @@ namespace Agent.Telephone.Management
                 pendingTts = null;
                 #endregion
 
-                providers.SetCallControl(
-                    this.ServiceProvider.GetRequiredService<ICallControl>());
-                providers.SetDtmfInput(this.ServiceProvider.GetRequiredService<IDtmfInput>());
+                #region Offline Dialogue
+                pendingOfflineDialogue = this.ServiceProvider.GetRequiredService<IOfflineDialogue>();
+                if (!pendingOfflineDialogue.Build(ModelSetting.Empty))
+                {
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", pendingOfflineDialogue.ModelName);
+                    return false;
+                }
+                providers.SetOfflineDialogue(pendingOfflineDialogue);
+                pendingOfflineDialogue = null;
+                #endregion
+
+                #region Call Control
+                pendingCallControl = this.ServiceProvider.GetRequiredService<ICallControl>();
+                if (!pendingCallControl.Build(this.Config.AssistantConfigs))
+                {
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", pendingCallControl.ModelName);
+                    return false;
+                }
+                providers.SetCallControl(pendingCallControl);
+                pendingCallControl = null;
+                #endregion
+
+                #region Dtmf Input
+                pendingDtmfInput = this.ServiceProvider.GetRequiredService<IDtmfInput>();
+                if (!pendingDtmfInput.Build(ModelSetting.Empty))
+                {
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", pendingDtmfInput.ModelName);
+                    return false;
+                }
+                providers.SetDtmfInput(pendingDtmfInput);
+                pendingDtmfInput = null; 
+                #endregion
 
                 return true;
             }
@@ -254,6 +292,9 @@ namespace Agent.Telephone.Management
                 {
                     pendingTts.Dispose();
                 }
+                pendingOfflineDialogue?.Dispose();
+                pendingCallControl?.Dispose();
+                pendingDtmfInput?.Dispose();
             }
         }
 
@@ -292,36 +333,18 @@ namespace Agent.Telephone.Management
         #endregion
 
         #region VAD
-        private static void RegisterVad(IServiceCollection services, ModelConfig config, string key)
+        private static void RegisterVad(IServiceCollection services, ModelConfig config)
         {
-            string selectedModelName = ConvertToKebabCase(config.SelectedDefaultSettings["VAD"]);
-            switch (selectedModelName)
-            {
-                case "sense-voice":
-                    services.AddKeyedSingleton<IAsr, SenseVoice>(key);
-                    break;
-                case "paraformer":
-                    services.AddKeyedSingleton<IAsr, Paraformer>(key);
-                    break;
-                case "silero-native":
-                    services.AddKeyedTransient<IVad, SileroNative>(key);
-                    break;
-                default:
-                    throw new ModelBuildException("Invalid asr model.");
-            }
             foreach (var vadSettingItem in config.ConfiguredSettings["VAD"])
             {
                 string modelName = ConvertToKebabCase(vadSettingItem.Key);
                 switch (modelName)
                 {
                     case "silero":
-                        services.AddKeyedSingleton<IVad, Silero>(key);
-                        break;
-                    case "paraformer":
-                        services.AddKeyedSingleton<IAsr, Paraformer>(key);
+                        services.AddKeyedSingleton<IVad, Silero>(modelName);
                         break;
                     case "silero-native":
-                        services.AddKeyedTransient<IVad, SileroNative>(key);
+                        services.AddKeyedTransient<IVad, SileroNative>(modelName);
                         break;
                     default:
                         throw new ModelBuildException("Invalid vad model.");
@@ -331,20 +354,8 @@ namespace Agent.Telephone.Management
         #endregion
 
         #region ASR
-        private static void RegisterAsr(IServiceCollection services, ModelConfig config, string key)
+        private static void RegisterAsr(IServiceCollection services, ModelConfig config)
         {
-            string selectedModelName = ConvertToKebabCase(config.SelectedDefaultSettings["ASR"]);
-            switch (selectedModelName)
-            {
-                case "sense-voice":
-                    services.AddKeyedSingleton<IAsr, SenseVoice>(key);
-                    break;
-                case "paraformer":
-                    services.AddKeyedSingleton<IAsr, Paraformer>(key);
-                    break;
-                default:
-                    throw new ModelBuildException("Invalid asr model.");
-            }
             foreach (var asrSettingItem in config.ConfiguredSettings["ASR"])
             {
                 string modelName = ConvertToKebabCase(asrSettingItem.Key);
@@ -352,11 +363,9 @@ namespace Agent.Telephone.Management
                 {
                     case "sense-voice":
                         services.AddKeyedSingleton<IAsr, SenseVoice>(modelName);
-                        services.AddKeyedSingleton<IAsr, SenseVoice>(key);
                         break;
                     case "paraformer":
                         services.AddKeyedSingleton<IAsr, Paraformer>(modelName);
-                        services.AddKeyedSingleton<IAsr, Paraformer>(key);
                         break;
                     default:
                         throw new ModelBuildException("Invalid asr model.");
@@ -402,53 +411,18 @@ namespace Agent.Telephone.Management
         #endregion
 
         #region TTS
-        private static void RegisterTts(IServiceCollection services, ModelConfig config, string key)
+        private static void RegisterTts(IServiceCollection services, ModelConfig config)
         {
-            string selectedModelName = ConvertToKebabCase(config.SelectedDefaultSettings["TTS"]);
-            switch (selectedModelName)
-            {
-                case "kokoro":
-                    services.AddKeyedSingleton<ITts, Kokoro>(key);
-                    break;
-                case "huoshan-bidirection":
-                    services.AddKeyedTransient<ITts, HuoshanBidirectionTTS>(key);
-                    break;
-                /*
-                case "huoshan-unidirectional":
-                    services.AddKeyedTransient<ITts, HuoshanUnidirectionalTTS>(modelName);
-                    services.AddKeyedTransient<ITts, HuoshanUnidirectionalTTS>(key);
-                    break;
-                */
-                case "huoshan-http":
-                    services.AddSingleton(_ => new FlurlClientCache()
-                    .Add(nameof(HuoshanHttpTTS), configure: builder =>
-                    {
-                        builder.Settings.JsonSerializer = new DefaultJsonSerializer(JsonHelper.OPTIONS);
-                    }));
-                    services.AddKeyedTransient<ITts, HuoshanHttpTTS>(key);
-                    break;
-                case "huoshan-http-v3":
-                    services.AddSingleton(_ => new FlurlClientCache()
-                    .Add(nameof(HuoshanHttpV3TTS), configure: builder =>
-                    {
-                        builder.Settings.JsonSerializer = new DefaultJsonSerializer(JsonHelper.OPTIONS);
-                    }));
-                    services.AddKeyedTransient<ITts, HuoshanHttpV3TTS>(key);
-                    break;
-                default:
-                    throw new ModelBuildException("Invalid tts model.");
-            }
             foreach (var ttsSettingItem in config.ConfiguredSettings["TTS"])
             {
                 string modelName = ConvertToKebabCase(ttsSettingItem.Key);
                 switch (modelName)
                 {
                     case "kokoro":
-                        services.AddKeyedSingleton<ITts, Kokoro>(key);
+                        services.AddKeyedSingleton<ITts, Kokoro>(modelName);
                         break;
                     case "huoshan-bidirection":
                         services.AddKeyedTransient<ITts, HuoshanBidirectionTTS>(modelName);
-                        services.AddKeyedTransient<ITts, HuoshanBidirectionTTS>(key);
                         break;
                     case "huoshan-http":
                         services.AddSingleton(_ => new FlurlClientCache()
@@ -457,7 +431,6 @@ namespace Agent.Telephone.Management
                             builder.Settings.JsonSerializer = new DefaultJsonSerializer(JsonHelper.OPTIONS);
                         }));
                         services.AddKeyedTransient<ITts, HuoshanHttpTTS>(modelName);
-                        services.AddKeyedTransient<ITts, HuoshanHttpTTS>(key);
                         break;
                     case "huoshan-http-v3":
                         services.AddSingleton(_ => new FlurlClientCache()
@@ -466,7 +439,6 @@ namespace Agent.Telephone.Management
                             builder.Settings.JsonSerializer = new DefaultJsonSerializer(JsonHelper.OPTIONS);
                         }));
                         services.AddKeyedTransient<ITts, HuoshanHttpV3TTS>(modelName);
-                        services.AddKeyedTransient<ITts, HuoshanHttpV3TTS>(key);
                         break;
                     default:
                         throw new ModelBuildException("Invalid tts model.");
@@ -479,12 +451,12 @@ namespace Agent.Telephone.Management
         private static void RegisterCallControl(IServiceCollection services, ModelConfig config)
         {
             services.AddSingleton<TransferReservationRegistry>();
-            services.AddSingleton<ICallControl, AssistantRoleControl>();
+            services.AddTransient<ICallControl, AssistantRoleControl>();
         }
 
         private static void RegisterOfflineDialogue(IServiceCollection services, ModelConfig config)
         {
-            services.AddSingleton<IOfflineDialogue, OfflineDialogueProvider>();
+            services.AddTransient<IOfflineDialogue, DefaultOfflineDialogue>();
         }
 
         #endregion

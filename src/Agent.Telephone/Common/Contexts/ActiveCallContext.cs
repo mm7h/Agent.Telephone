@@ -13,9 +13,11 @@ namespace Agent.Telephone.Common.Contexts
     {
         private readonly string _userAor;
         private readonly CancellationTokenSource _callCts = new();
+        private readonly CancellationToken _callToken;
         private readonly object _turnLock = new();
         private readonly object _lifetimeLock = new();
         private readonly object _agentSessionLock = new();
+        private readonly object _promptPlaybackLock = new();
         private readonly List<IDisposable> _callOwnedResources = [];
         private CancellationTokenSource _turnCts;
         private long _turnId;
@@ -24,6 +26,8 @@ namespace Agent.Telephone.Common.Contexts
         private bool _callEnded;
         private bool _assistantSwitching;
         private int _agentMediaPaused;
+        private int _userAudioInputPaused;
+        private TaskCompletionSource<bool>? _promptPlaybackCompletion;
 
         public ActiveCallContext(SIPTransport sipTransport, SIPRequest sipRequest, DeviceContext deviceContext)
         {
@@ -33,6 +37,7 @@ namespace Agent.Telephone.Common.Contexts
             this.CallId = Guid.NewGuid().ToString("N");
             this.DeviceId = deviceContext.DeviceId;
             this._turnCts = new CancellationTokenSource();
+            this._callToken = this._callCts.Token;
 
             this.CreateSIPUserAgent(sipTransport);
             this.CreateVoIPMediaSession();
@@ -53,8 +58,10 @@ namespace Agent.Telephone.Common.Contexts
             this.CallId = Guid.NewGuid().ToString("N");
             this.DeviceId = deviceContext.DeviceId;
             this._turnCts = new CancellationTokenSource();
+            this._callToken = this._callCts.Token;
             this.UserAgent = userAgent;
             this.VoIPRTP = mediaSession;
+            this.NegotiatedAudioFormat = mediaSession.AudioStream.GetSendingFormat().ToAudioFormat();
             this.PacketTimeMs = AudioProcessSettings.DefaultPacketTimeMs;
             this.MaxPacketTimeMs = this.PacketTimeMs;
             this.CallerNumber = SIPURI.ParseSIPURI(userAor).User;
@@ -75,9 +82,10 @@ namespace Agent.Telephone.Common.Contexts
         public AIAgentContext AIAgentContext { get; private set; }
         public AssistantConfig AssistantConfig { get; private set; }
         public long TurnId => Interlocked.Read(ref this._turnId);
-        public CancellationToken CallToken => this._callCts.Token;
+        public CancellationToken CallToken => this._callToken;
         public CancellationToken Token => this._turnCts.Token;
         public bool IsAgentMediaPaused => Volatile.Read(ref this._agentMediaPaused) != 0;
+        public bool IsUserAudioInputPaused => Volatile.Read(ref this._userAudioInputPaused) != 0;
         public bool IsAgentSwitching
         {
             get
@@ -94,6 +102,46 @@ namespace Agent.Telephone.Common.Contexts
 
         public void PauseAgentMedia() => Interlocked.Exchange(ref this._agentMediaPaused, 1);
         public void ResumeAgentMedia() => Interlocked.Exchange(ref this._agentMediaPaused, 0);
+        public void PauseUserAudioInput() => Interlocked.Exchange(ref this._userAudioInputPaused, 1);
+        public void ResumeUserAudioInput() => Interlocked.Exchange(ref this._userAudioInputPaused, 0);
+
+        public Task<bool> BeginPromptPlayback()
+        {
+            lock (this._promptPlaybackLock)
+            {
+                if (this._callCts.IsCancellationRequested || this._promptPlaybackCompletion is not null)
+                {
+                    return Task.FromResult(false);
+                }
+
+                var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                this._promptPlaybackCompletion = completion;
+                return completion.Task;
+            }
+        }
+
+        public bool IsPromptPlaybackPending
+        {
+            get
+            {
+                lock (this._promptPlaybackLock)
+                {
+                    return this._promptPlaybackCompletion is not null;
+                }
+            }
+        }
+
+        public void CompletePromptPlayback(bool fullyPlayed)
+        {
+            TaskCompletionSource<bool>? completion;
+            lock (this._promptPlaybackLock)
+            {
+                completion = this._promptPlaybackCompletion;
+                this._promptPlaybackCompletion = null;
+            }
+
+            completion?.TrySetResult(fullyPlayed);
+        }
         public void MarkPlayingPrompt() =>
             this.DeviceContext.MarkPlayingPrompt(this);
         public void MarkEnding() =>
@@ -168,6 +216,7 @@ namespace Agent.Telephone.Common.Contexts
 
             AssistantConfig? targetAssistant;
             AIAgentContext currentAgent;
+            IReadOnlyList<OfflineDialogueTurn> completedOnlineTurns;
             lock (this._agentSessionLock)
             {
                 if (!this._assistantSwitching ||
@@ -183,6 +232,7 @@ namespace Agent.Telephone.Common.Contexts
                 }
 
                 currentAgent = this.AIAgentContext;
+                completedOnlineTurns = currentAgent.GetCompletedOnlineTurns();
             }
 
             currentAgent.Dispose();
@@ -199,6 +249,10 @@ namespace Agent.Telephone.Common.Contexts
                 this.DialedNumber = targetAssistantNumber;
                 this.AssistantConfig = targetAssistant;
                 this.AIAgentContext = new AIAgentContext(this);
+                foreach (OfflineDialogueTurn turn in completedOnlineTurns)
+                {
+                    this.AIAgentContext.RecordCompletedOnlineTurn(turn);
+                }
                 return true;
             }
         }
@@ -395,6 +449,7 @@ namespace Agent.Telephone.Common.Contexts
             }
 
             this._callCts.Cancel();
+            this.CompletePromptPlayback(fullyPlayed: false);
             this.VoIPRTP.Close("call ended");
         }
 

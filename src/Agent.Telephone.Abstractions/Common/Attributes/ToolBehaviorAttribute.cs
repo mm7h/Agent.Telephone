@@ -30,8 +30,8 @@ namespace Agent.Telephone.Abstractions.Common.Attributes
         public bool AllowIntentDetection { get; set; } = true;
 
         /// <summary>
-        /// Keys that may select this function from an active DTMF menu.
-        /// Multiple keys can be combined with the bitwise OR operator.
+        /// 从当前活动的双音多频（DTMF）菜单中选择此功能的按键。
+        /// 多个键可以使用按位或运算符进行组合。
         /// </summary>
         public DtmfKey DtmfKeys { get; set; } = DtmfKey.None;
     }

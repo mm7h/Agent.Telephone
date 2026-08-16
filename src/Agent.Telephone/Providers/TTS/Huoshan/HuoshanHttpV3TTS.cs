@@ -1,14 +1,13 @@
-﻿using Agent.Telephone.Abstractions.Configs;
+﻿using System.Text;
+using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Common.Enums;
 using Agent.Telephone.Helpers;
+using Agent.Telephone.Media.Abstractions;
 using Agent.Telephone.Providers.TTS.Huoshan.Protocols.Models;
-using Agent.Telephone.Resources;
-using IAudioEditor = Agent.Telephone.Media.Abstractions.IAudioEditor;
 using Flurl.Http;
 using Flurl.Http.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Text;
 
 namespace Agent.Telephone.Providers.TTS.Huoshan
 {
@@ -175,7 +174,12 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
                     {
                         if (pcmBuffer.Count > 0)
                         {
-                            await this.SaveAudioFileAsync(workflow.DeviceId, seg.SentenceId, pcmBuffer.ToArray());
+                            await this.SaveAudioFileAsync(
+                                workflow.DeviceId,
+                                workflow.CallerNumber,
+                                workflow.DialedNumber,
+                                seg.SentenceId,
+                                pcmBuffer.ToArray());
                         }
 
                         this.TTSEventCallback?.OnProcessed(seg.Content, seg.IsFirstSegment, seg.IsLastSegment, TtsGenerateResult.Success);

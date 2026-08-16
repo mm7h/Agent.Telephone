@@ -2,6 +2,7 @@
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Handlers.AIAdapterHandlers;
+using Agent.Telephone.Providers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
 using SIPSorcery.Media;
@@ -31,9 +32,23 @@ namespace Agent.Telephone.Handlers.SIPHandlers
 
         public override bool Build()
         {
+            PrivateProvider privateProvider = this.ActiveCallContext.AIAgentContext.PrivateProvider;
+            if (privateProvider.OfflineDialogue is null ||
+                privateProvider.DtmfInput is null ||
+                privateProvider.CallControl is null)
+            {
+                this.Logger.LogError("设备 {deviceId} 未配置 SIP 通话控制提供程序。", this.ActiveCallContext.DeviceId);
+                return false;
+            }
+
             this._rtpContext = this.ActiveCallContext.VoIPRTP;
+            privateProvider.OfflineDialogue.RegisterDevice(this.ActiveCallContext);
+            privateProvider.DtmfInput.RegisterDevice(this.ActiveCallContext);
+            privateProvider.CallControl.RegisterDevice(this.ActiveCallContext);
+
             this._rtpContext.OnRtpPacketReceived += this.OnRtpPacketReceivedAsync;
             this._rtpContext.OnAudioFormatsNegotiated += this.OnAudioFormatsNegotiated;
+            this.RegisterCancellationToken(this.ActiveCallContext);
             return true;
         }
 
@@ -47,7 +62,7 @@ namespace Agent.Telephone.Handlers.SIPHandlers
 
             ActiveCallContext activeCall = this.ActiveCallContext;
 
-            if (activeCall.IsAgentMediaPaused)
+            if (activeCall.IsAgentMediaPaused || activeCall.IsUserAudioInputPaused)
             {
                 return;
             }
@@ -67,6 +82,10 @@ namespace Agent.Telephone.Handlers.SIPHandlers
             {
                 this._rtpPacketWorkflowPool.Return(workflow);
             }
+            catch (ChannelClosedException)
+            {
+                this._rtpPacketWorkflowPool.Return(workflow);
+            }
         }
 
         private void OnAudioFormatsNegotiated(List<AudioFormat> audioFormats)
@@ -79,7 +98,9 @@ namespace Agent.Telephone.Handlers.SIPHandlers
             if (this._rtpContext is not null)
             {
                 this._rtpContext.OnRtpPacketReceived -= this.OnRtpPacketReceivedAsync;
+                this._rtpContext.OnAudioFormatsNegotiated -= this.OnAudioFormatsNegotiated;
             }
+            base.Dispose();
         }
     }
 }

@@ -1,7 +1,6 @@
 ﻿using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Helpers;
-using Agent.Telephone.Resources;
-using IAudioEditor = Agent.Telephone.Media.Abstractions.IAudioEditor;
+using Agent.Telephone.Media.Abstractions;
 using Microsoft.Extensions.Logging;
 using SherpaOnnx;
 

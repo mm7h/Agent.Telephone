@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using Agent.Telephone.Abstractions.Configs;
+using Agent.Telephone.Abstractions.Persistence;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Common.Enums;
@@ -80,6 +81,34 @@ public sealed class SipRegistrarInboundTests
         Assert.False(device.IsRegistered());
         Assert.Equal(RegistrationState.Expired, device.RegistrationState);
         Assert.Null(manager.GetRegisteredSIPDeviceById(shortRegistration));
+    }
+
+    [Fact]
+    public async Task PersistedRegistrationRestoresAfterRestartWithDefaultOneHourExpiryAsync()
+    {
+        using SIPTransport transport = new();
+        using DefaultMemoryStore initialStore = new();
+        var registrationStore = new TestRegistrationStore();
+        using ServiceProvider services = new ServiceCollection()
+            .AddSingleton(transport)
+            .AddSingleton<ITelephoneStore>(registrationStore)
+            .BuildServiceProvider();
+        TelephoneConfig config = CreateConfig();
+        DeviceContextManager initialManager = CreateDeviceManager(initialStore, config, services);
+        SIPRequest register = CreateRegisterRequest("sip:1001@192.0.2.10:5060", -1, -1);
+
+        await initialManager.OnSIPDeviceRegisteringAsync(transport, register);
+
+        DeviceRegistrationRecord saved = Assert.Single(await registrationStore.GetActiveDeviceRegistrationsAsync(DateTimeOffset.Now));
+        Assert.Equal(TimeSpan.FromHours(1), saved.ExpiresAt - saved.RefreshedAt);
+
+        using DefaultMemoryStore restartedStore = new();
+        DeviceContextManager restartedManager = CreateDeviceManager(restartedStore, config, services);
+        await restartedManager.RestoreRegistrationsAsync(CancellationToken.None);
+
+        DeviceContext restored = Assert.IsType<DeviceContext>(
+            restartedManager.GetRegisteredSIPDeviceById(CreateInviteRequest(ASSISTANT_NUMBER, "0")));
+        Assert.Equal("192.0.2.10:5060", restored.Registration!.Contact.Host);
     }
 
     [Fact]
@@ -182,9 +211,7 @@ public sealed class SipRegistrarInboundTests
 
         AIAgentContext originalAgent = activeCall.AIAgentContext;
         string originalCallId = activeCall.CallId;
-        var originalResource = new TrackingDisposable();
         var callOwnedResource = new TrackingDisposable();
-        originalAgent.RegisterOwnedResource(originalResource);
         activeCall.RegisterCallOwnedResource(callOwnedResource);
 
         Assert.True(activeCall.TryBeginAssistantSwitch());
@@ -193,7 +220,6 @@ public sealed class SipRegistrarInboundTests
         Assert.True(activeCall.IsAgentMediaPaused);
         Assert.True(activeCall.TryReplaceAssistantSession(TARGET_ASSISTANT_NUMBER));
 
-        Assert.True(originalResource.IsDisposed);
         Assert.False(callOwnedResource.IsDisposed);
         Assert.NotSame(originalAgent, activeCall.AIAgentContext);
         Assert.Equal(TARGET_ASSISTANT_NUMBER, activeCall.DialedNumber);
@@ -478,6 +504,104 @@ public sealed class SipRegistrarInboundTests
         public void Dispose()
         {
             this.IsDisposed = true;
+        }
+    }
+
+    private sealed class TestRegistrationStore : ITelephoneStore
+    {
+        private readonly Dictionary<string, DeviceRegistrationRecord> _registrations = [];
+
+        public Task SaveConversationMessageAsync(ConversationMessage message, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task SaveMessageSegmentAsync(MessageSegment segment, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task FinalizeAssistantMessageAsync(
+            string userAor,
+            string assistantNumber,
+            string messageId,
+            string fullText,
+            DeliveryState state,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task FailAssistantMessageAsync(
+            string userAor,
+            string assistantNumber,
+            string messageId,
+            string fullText,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task DiscardAssistantMessageAsync(
+            string userAor,
+            string assistantNumber,
+            string messageId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<ConversationMessage>> GetUnreadAssistantMessagesAsync(
+            string userAor,
+            string assistantNumber,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<ConversationMessage>> GetConversationMessagesAsync(
+            string userAor,
+            string assistantNumber,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<ConversationMessage?> GetAssistantMessageAsync(
+            string userAor,
+            string assistantNumber,
+            string messageId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<MessageSegment>> GetMessageSegmentsAsync(
+            string messageId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task MarkAssistantMessageReadAsync(
+            string userAor,
+            string assistantNumber,
+            string messageId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task MarkAssistantMessagesReadAsync(
+            string userAor,
+            string assistantNumber,
+            IReadOnlyCollection<string> messageIds,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<MessageCleanupResult> CleanupConversationMessagesAsync(
+            DateTimeOffset now,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task SaveDeviceRegistrationAsync(DeviceRegistrationRecord registration, CancellationToken cancellationToken = default)
+        {
+            this._registrations[registration.DeviceId] = registration;
+            return Task.CompletedTask;
+        }
+
+        public Task RemoveDeviceRegistrationAsync(string deviceId, CancellationToken cancellationToken = default)
+        {
+            this._registrations.Remove(deviceId);
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<DeviceRegistrationRecord>> GetActiveDeviceRegistrationsAsync(
+            DateTimeOffset now,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<DeviceRegistrationRecord>>(
+                this._registrations.Values.Where(registration => registration.ExpiresAt > now).ToList());
         }
     }
 }

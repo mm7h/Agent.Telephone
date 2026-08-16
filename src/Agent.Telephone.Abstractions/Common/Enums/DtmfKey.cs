@@ -1,8 +1,8 @@
-namespace Agent.Telephone.Abstractions.Common.Enums
+﻿namespace Agent.Telephone.Abstractions.Common.Enums
 {
     /// <summary>
-    /// Telephone keypad keys that can be assigned to a function tool.
-    /// The values are flags rather than RTP telephone-event payload values.
+    /// 可分配给功能工具的电话键盘按键。
+    /// 支持多个按键的组合，使用按位或运算符进行组合。
     /// </summary>
     [Flags]
     public enum DtmfKey

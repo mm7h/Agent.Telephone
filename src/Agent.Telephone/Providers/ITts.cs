@@ -6,7 +6,7 @@ namespace Agent.Telephone.Providers
 {
     internal interface ITts : IProvider<ModelSetting>
     {
-        void RegisterDevice(string deviceId, ITtsEventCallback callback);
+        void RegisterDevice(ActiveCallContext activeCall, ITtsEventCallback callback);
         Task SynthesisAsync(Workflow<OutSegment> workflow, CancellationToken token);
         string? GetSavedAudioFilePath(string sentenceId);
     }

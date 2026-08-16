@@ -13,54 +13,58 @@
     "AgentInitializationTimeoutSeconds": 30,
     "CallbackTimeoutSeconds": 30
   },
-  "PromptMediaPath": "./data/prompt-media",
-  "PromptMediaConfigs": {
-    "180": "180.mp3", // assistant switching ringback
-    "402": "402.mp3", // payment required
-    "404": "404.mp3", // not found
-    "480": "480.mp3", // assistant temporary unavailable
-    "486": "486.mp3", // busy here
-    "488": "488.mp3", // not acceptable here
-    "503": "503.mp3" // service unavailable
+  "PromptConfig": {
+    // 电话接通后，接线员的第一句话模板。随机选择一条作为开场白。
+    "HelloMessageTempletes": [
+      "您好，请问有什么可以帮您？",
+      "您好，请问您需要咨询什么问题？",
+      "您好，请问有什么问题需要协助？",
+      "您好，遇到什么问题需要帮助？"
+    ]
   },
   "AssistantConfigs": [
     {
       "DialingNumber": "10000",
       "Name": "Operator",
-      "Prompt": "你是一名专业、简洁的电话接线员。你的职责是了解来电者的需求，并在需求明确后把当前通话转接给合适的助手。可转接的角色只有：10086（通用问答助理，适合日常咨询、知识问答、建议与闲聊）；10085（写作与语言助理，适合文案起草、润色、改写、翻译和表达建议）。先用一句自然、友好的话询问来电者需要什么帮助；若意图不明确，只追问一个最关键的问题。确认目标角色后，立即调用 SwitchAssistantAsync，并且只能传入 10086 或 10085。转接前无需重复确认，也不要尝试自行回答属于目标角色的问题；不得编造号码、助手能力或转接结果。若需求不属于上述两类，简要说明可提供的两项服务并请来电者选择。",
+      "Prompt": "AssistantPrompts/10000.md", // 角色提示词文件
       "VAD": "SileroNative",
       "ASR": "SenseVoice",
       "Intent": "FunctionCall",
-      "LLM": "Chatglm",
+      "LLM": "Qwen",
       "TTS": "HuoshanBidirection",
       "Memory": "FlashMemory",
       "AllowedTools": [
+        // 允许使用的工具列表，工具名称必须与ToolConfig中定义的名称一致
         "SwitchAssistantAsync"
       ]
     },
     {
       "DialingNumber": "10086",
       "Name": "DefaultAssistant 1",
-      "Prompt": "你是 10086 通用问答助理，通过电话为用户提供自然、可靠的日常帮助。你可以回答常识和知识问题，协助分析问题、梳理思路、提供建议，也可以进行轻松友好的闲聊。回答要口语化、简洁、便于收听：先给出结论或可执行建议，再补充必要说明；一次只表达少量重点，避免长段落、表格、链接、代码和复杂编号。信息不足时先问一个关键澄清问题；不确定的事实要明确说明不确定性，不要编造。对于医疗、法律、金融等高风险问题，只提供一般性信息，并建议用户咨询合格的专业人士。",
+      "Prompt": "AssistantPrompts/10086.md",
       "VAD": "SileroNative",
       "ASR": "SenseVoice",
-      "Intent": "IntentLlm",
-      "LLM": "Chatglm",
+      "Intent": "FunctionCall",
+      "LLM": "Qwen",
       "TTS": "HuoshanBidirection",
       "Memory": "FlashMemory",
-      "AllowedTools": []
+      "AllowedTools": [
+        "GetWeatherInfo"
+      ]
     },
     {
       "DialingNumber": "10085",
       "Name": "DefaultAssistant 2",
-      "Prompt": "你是 10085 写作与语言助理，通过电话帮助用户起草、润色、改写、翻译和优化表达。先确认文本用途、受众、语气和长度；若用户已提供原文，优先在不改变核心事实和意图的前提下修改。电话场景下应先说出最实用的成稿或关键改动，再用简短说明解释；内容较长时，先提供精简版本，并询问用户是否需要继续展开或逐句调整。译文要自然、符合目标语言习惯；信息不完整或存在歧义时，只问一个最关键的问题。不要虚构原文、引用、数据或事实；对正式、法律、医疗或商业文件，提醒用户在使用前自行核对关键信息。",
+      "Prompt": "AssistantPrompts/10085.md",
       "VAD": "SileroNative",
       "ASR": "SenseVoice",
       "Intent": "IntentLlm",
-      "LLM": "Chatglm",
+      "LLM": "Qwen",
       "TTS": "HuoshanBidirection",
       "Memory": "FlashMemory",
-      "AllowedTools": []
+      "AllowedTools": [
+        "GetWeatherInfo"
+      ]
     }
   ],
   "ModelConfig": {
@@ -114,9 +118,8 @@
         "Chatglm": {
           "BaseUrl": "https://open.bigmodel.cn/api/paas/v4/",
           "ApiKey": "to your llm api key",
-          "ModelName": "glm-4-flash"
+          "ModelName": "glm-4.7-flash"
         },
-        // Deepseek对json序列化的结果无法支持
         "Deepseek": {
           "BaseUrl": "https://api.deepseek.com",
           "ApiKey": "to your llm api key",
@@ -139,7 +142,7 @@
           "FileSavingOption": {
             "SaveFile": true,
             "SavePath": "./data/tts-cache",
-            "Format": "pcm"
+            "Format": "mp3"
           }
         },
         "HuoshanBidirection": {
@@ -152,7 +155,7 @@
           "FileSavingOption": {
             "SaveFile": true,
             "SavePath": "./data/tts-cache",
-            "Format": "pcm"
+            "Format": "mp3"
           }
         },
         "HuoshanHttp": {
@@ -194,9 +197,6 @@
         "FunctionCall": {
           "Type": "FunctionCall"
         }
-      },
-      "Memory": {
-        "FlashMemory": {}
       }
     }
   }

@@ -1,43 +1,29 @@
-﻿using Microsoft.Agents.AI;
-using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading;
-using System.Threading.Tasks;
 using Agent.Telephone.Common.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Common.Exceptions;
 using Agent.Telephone.Helpers;
 using Agent.Telephone.Providers.LLM.Contexts;
+using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.Workflows;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Agent.Telephone.Providers.LLM.Agents
 {
     internal class ChatAgent : BaseAgent<ChatAgent>
     {
         private const string FUNCTION_CALL_INTENT_TYPE = "FunctionCall";
-        private const string NONE_INTENT_TYPE = "None";
         private const string ENHANCED_CHAT_PROMPT = """
 请在遵守上方角色设定的前提下，额外严格遵守以下回复规则：
 1. 回复要像真实语音聊天，语气自然、简短、直接，第一句先回答核心内容，不要先寒暄，不要自我解释。
 2. 用户输入可能来自 ASR 转写，允许存在同音字、错别字、断句不准，你要优先理解真实意图，不要纠正用户的识别结果。
 3. 除非用户明确要求切换语言，否则始终沿用当前对话语言回复。
 4. 输出内容必须适合 TTS 朗读：不要使用 Markdown、代码块、XML/HTML 标签、项目符号或解释性括号动作。
-5. 情绪表达必须放在每个输出句段最前面，格式固定为 [EmotionName] 正文。EmotionName 只能从以下 Emotion 枚举中选择：Neutral、Happy、Laughing、Funny、Sad、Angry、Crying、Loving、Embarrassed、Surprised、Shocked、Thinking、Winking、Cool、Relaxed、Delicious、Kissy、Confident、Sleepy、Silly、Confused。
-6. 如果一个回复包含多句、分段或换行，那么每个独立句段都必须重新写一次 [EmotionName] 前缀，不能只在第一句前面标一次。
-7. 情绪选择必须和正文语义一致；拿不准时统一使用 [Neutral]；需要思考、停顿、分析时优先使用 [Thinking]。
-8. 表情生成规则：不要在正文中自由输出表情符号；情绪只能来源于 Emotion 枚举。如果确实需要补充可视化表情，也只能使用该 Emotion 枚举 Description 对应的单个表情，并且只能紧跟在 [EmotionName] 后面，正文其他位置禁止出现表情。
-9. 不要输出 Emotion 枚举之外的情绪名称、别名、自定义标签或没有前缀的正文。
-
-输出示例：
-[Happy] 今天状态不错，我们直接开始。
-[Thinking] 这个问题我先替你理一下，结论其实不复杂。
 """;
 
         private ChatClientAgent? _chatClientAgent;
@@ -53,14 +39,14 @@ namespace Agent.Telephone.Providers.LLM.Agents
 
         public override int Order => 10;
 
-        public List<ChatMessage> ChatHistory
+        public void SetChatHistory(List<ChatMessage> chatHistory)
         {
-            get
+            if (this._agentSession is null)
             {
-                if (this._agentSession is null) return new List<ChatMessage>();
-                this._agentSession.TryGetInMemoryChatHistory(out List<ChatMessage>? history, jsonSerializerOptions: JsonHelper.OPTIONS);
-                return history ?? new List<ChatMessage>();
+                throw new InvalidOperationException("Chat agent is not built.");
             }
+
+            this._agentSession.SetInMemoryChatHistory(chatHistory, jsonSerializerOptions: JsonHelper.OPTIONS);
         }
 
         public override bool Build(LLMAgentBuildConfig agentBuildConfig)
@@ -101,10 +87,9 @@ namespace Agent.Telephone.Providers.LLM.Agents
 
                 return true;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                //todo
-                //this.Logger.LogError(ex, Lang.ChatAgent_Build_BuiltFailed, this.ProviderType, this.ModelName, agentBuildConfig.AgentSetting.ModelName);
+                this.Logger.LogError(ex, "构建 ChatAgent 失败，ModelName: {modelName}, AgentName: {agentName}", agentBuildConfig.AgentSetting.ModelName, this.AgentName);
                 return false;
             }
         }

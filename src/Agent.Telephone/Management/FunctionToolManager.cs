@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel;
 using System.Reflection;
 using Agent.Telephone.Abstractions.Common.Attributes;
+using Agent.Telephone.Abstractions.Common.Contexts;
 using Agent.Telephone.Abstractions.Common.Enums;
 using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Abstractions.FunctionTools;
@@ -22,6 +23,13 @@ namespace Agent.Telephone.Management
 {
     internal class FunctionToolManager : BaseManager
     {
+        private const DtmfKey SUPPORTED_DTMF_KEYS =
+            DtmfKey.Zero | DtmfKey.One | DtmfKey.Two | DtmfKey.Three |
+            DtmfKey.Four | DtmfKey.Five | DtmfKey.Six | DtmfKey.Seven |
+            DtmfKey.Eight | DtmfKey.Nine | DtmfKey.Star | DtmfKey.Pound;
+        private const string DTMF_TOOL_INSTRUCTION =
+            "调用此工具前，必须先以自然语音说明本描述定义的按键含义，再调用工具。不要在参数中提供按键结果；系统会等待一次按键并自动注入结果。";
+
         private readonly ILoggerFactory _loggerFactory;
 
         private readonly List<FunctionTool> _globalFunctionTools;
@@ -48,11 +56,10 @@ namespace Agent.Telephone.Management
             return builder.ConfigureServices((context, services) =>
             {
                 services.AddSingleton<FunctionToolManager>();
-                services.AddTransient<IPrivateFunctionTool, AssistantSwitchFunctionTool>();
-                services.AddTransient<IPrivateFunctionTool, DtmfInputFunctionTool>();
             });
         }
 
+        #region Build Components
         public override bool BuildComponent()
         {
             try
@@ -91,7 +98,7 @@ namespace Agent.Telephone.Management
                 }
 
                 this._hasFunctionTools = this._globalFunctionToolMethodMetadata.Any() || this._privateFunctionToolMethodMetadata.Any();
-                if (!this.ValidateAllowedTools())
+                if (!this.ValidateDtmfToolDefinitions() || !this.ValidateAllowedTools())
                 {
                     return false;
                 }
@@ -114,11 +121,10 @@ namespace Agent.Telephone.Management
                 return false;
             }
         }
+        #endregion
 
-        public override Task<bool> OnSIPDeviceRegisteredAsync(
-            DeviceContext deviceContext,
-            SIPTransport sipTransport,
-            SIPRequest sipRequest)
+        #region On Device Connecting
+        public override Task<bool> OnSIPDeviceRegisteredAsync(DeviceContext deviceContext, SIPTransport sipTransport, SIPRequest sipRequest)
         {
             return this.BuildForActiveCallAsync(deviceContext);
         }
@@ -136,6 +142,7 @@ namespace Agent.Telephone.Management
                 this.Logger.LogWarning("设备 {DeviceId} 没有活动呼叫，无法为其注册 FunctionTool", deviceContext.DeviceId);
                 return true;
             }
+            IAssistantControl assistantControl = new AssistantControlAdapter(activeCall);
             foreach (FunctionTool instance in this._globalFunctionTools)
             {
                 if (!this._globalFunctionToolMethodMetadata.TryGetValue(instance.GetType(), out IEnumerable<FunctionToolMethodMetadata>? methodMetas))
@@ -145,7 +152,7 @@ namespace Agent.Telephone.Management
 
                 foreach (FunctionToolMethodMetadata methodMeta in methodMetas.Where(method => this.IsAllowed(activeCall.AssistantConfig, instance.GetType(), method)))
                 {
-                    FunctionToolRegistration registration = this.BuildRegistration(instance, methodMeta);
+                    FunctionToolRegistration registration = this.BuildRegistration(instance, methodMeta, assistantControl);
                     activeCall.AIAgentContext.PrivateProvider.AddFunctionToolRegistration(registration);
                 }
             }
@@ -182,7 +189,7 @@ namespace Agent.Telephone.Management
                     instance.Logger = this._loggerFactory.CreateLogger(instance.GetType());
                     instance.ServerInfo = this.CreateServerInfoAdapter();
                     instance.DeviceContext = new SessionContextAdapter(deviceContext);
-                    instance.CallControl = new AssistantControlAdapter(activeCall);
+                    instance.CallControl = assistantControl;
 
                     initializedTools.Add(instance);
                     await instance.OnFunctionToolInitializedAsync();
@@ -192,12 +199,12 @@ namespace Agent.Telephone.Management
 
                     foreach (FunctionToolMethodMetadata methodMeta in allowedMethods)
                     {
-                        FunctionToolRegistration registration = this.BuildRegistration(instance, methodMeta);
+                        FunctionToolRegistration registration = this.BuildRegistration(instance, methodMeta, assistantControl);
                         activeCall.AIAgentContext.PrivateProvider.AddFunctionToolRegistration(instance, registration);
                     }
                 }
 
-                activeCall.AIAgentContext.RegisterOwnedResource(
+                activeCall.AIAgentContext.PrivateProvider.SetPrivateFunctionToolLifetime(
                     new PrivateFunctionToolLifetime(initializedTools, this.Logger));
                 initializedToolsOwned = true;
                 return true;
@@ -208,14 +215,11 @@ namespace Agent.Telephone.Management
                 {
                     try
                     {
-                        await FunctionToolManager.ReleasePrivateToolsAsync(initializedTools)
-                            ;
+                        await FunctionToolManager.ReleasePrivateToolsAsync(initializedTools);
                     }
                     catch (Exception releaseException)
                     {
-                        this.Logger.LogError(
-                            releaseException,
-                            "回滚通话级 FunctionTool 初始化时失败。");
+                        this.Logger.LogError(releaseException, "回滚通话级 FunctionTool 初始化时失败。");
                     }
                 }
                 throw;
@@ -234,51 +238,14 @@ namespace Agent.Telephone.Management
                         }
                         catch (Exception disposeException)
                         {
-                            this.Logger.LogError(
-                                disposeException,
-                                "释放未使用的通话级 FunctionTool {ToolType} 时失败。",
-                                tool.GetType().FullName);
+                            this.Logger.LogError(disposeException, "释放未使用的通话级 FunctionTool {ToolType} 时失败。", tool.GetType().FullName);
                         }
                     }
                 }
             }
         }
 
-
-
-        public override void Dispose()
-        {
-            this.ReleaseGlobalTools();
-        }
-
-        private void ReleaseGlobalTools()
-        {
-            foreach (FunctionTool instance in this._globalFunctionTools)
-            {
-                try
-                {
-                    instance.OnFunctionToolReleasedAsync()
-                        .AsTask()
-                        .GetAwaiter()
-                        .GetResult();
-                }
-                catch (Exception exception)
-                {
-                    this.Logger.LogError(
-                        exception,
-                        "释放全局 FunctionTool {ToolType} 失败。",
-                        instance.GetType().FullName);
-                }
-                finally
-                {
-                    if (instance is IDisposable disposable)
-                    {
-                        disposable.Dispose();
-                    }
-                }
-            }
-            this._globalFunctionTools.Clear();
-        }
+        #endregion
 
         private IEnumerable<FunctionToolMethodMetadata> ExtractTypeMetadata(object? instance, Type toolType)
         {
@@ -295,12 +262,6 @@ namespace Agent.Telephone.Management
                 string functionName = method.Name;
                 string? description = method.GetCustomAttribute<DescriptionAttribute>()?.Description;
                 ToolBehaviorAttribute? behavior = method.GetCustomAttribute<ToolBehaviorAttribute>();
-                AIFunction aiFunction = AIFunctionFactory.Create(method, new AIFunctionFactoryOptions
-                {
-                    Name = functionName,
-                    Description = description ?? functionName,
-                    SerializerOptions = JsonHelper.OPTIONS
-                });
 
                 FunctionToolMethodMetadata functionToolMethodMetadata = new FunctionToolMethodMetadata
                 {
@@ -316,21 +277,40 @@ namespace Agent.Telephone.Management
             }
         }
 
-        private FunctionToolRegistration BuildRegistration(object instance, FunctionToolMethodMetadata methodMeta)
+        private FunctionToolRegistration BuildRegistration(
+            object instance,
+            FunctionToolMethodMetadata methodMeta,
+            IAssistantControl assistantControl)
         {
             DtmfKey dtmfKeys = methodMeta.Behavior?.DtmfKeys ?? DtmfKey.None;
             string description = methodMeta.Description ?? methodMeta.FunctionName;
             if (dtmfKeys != DtmfKey.None)
             {
-                description = $"{description}。可由电话按键 {dtmfKeys} 选择。";
+                description = $"{description}\n\n{BuildDtmfKeyInstruction(dtmfKeys)}";
             }
 
             AIFunction aiFunction = AIFunctionFactory.Create(methodMeta.Method, instance, new AIFunctionFactoryOptions
             {
                 Name = methodMeta.FunctionName,
                 Description = description,
-                SerializerOptions = JsonHelper.OPTIONS
+                SerializerOptions = JsonHelper.OPTIONS,
+                ConfigureParameterBinding = parameter => parameter.ParameterType == typeof(DtmfInputResult)
+                    ? new AIFunctionFactoryOptions.ParameterBindingOptions { ExcludeFromSchema = true }
+                    : default,
             });
+
+            if (dtmfKeys != DtmfKey.None)
+            {
+                // 构建关于按键输入的阻塞逻辑，确保在调用函数前获取按键输入结果
+                ParameterInfo dtmfInputParameter = methodMeta.Method
+                    .GetParameters()
+                    .Single(parameter => parameter.ParameterType == typeof(DtmfInputResult));
+                aiFunction = new DtmfGatedAIFunction(
+                    aiFunction,
+                    assistantControl,
+                    dtmfKeys,
+                    dtmfInputParameter.Name!);
+            }
 
             FunctionMetadata metadata = aiFunction.ToFunctionMetadata();
 
@@ -341,13 +321,116 @@ namespace Agent.Telephone.Management
                 dtmfKeys);
         }
 
-        private bool IsAllowed(
-            AssistantConfig assistant,
-            Type toolType,
-            FunctionToolMethodMetadata methodMetadata)
+        private static string BuildDtmfKeyInstruction(DtmfKey keys)
         {
-            return assistant.AllowedTools?.Any(
-                allowed => ToolMatches(allowed, toolType, methodMetadata)) == true;
+            string acceptedKeys = string.Join(
+                "、",
+                Enum.GetValues<DtmfKey>()
+                    .Where(key => key != DtmfKey.None && keys.HasFlag(key))
+                    .Select(GetDtmfKeyLabel));
+            return $"当前函数可接受的 DTMF 按键为：{acceptedKeys}。\n{DTMF_TOOL_INSTRUCTION}";
+        }
+
+        private static string GetDtmfKeyLabel(DtmfKey key)
+        {
+            return key switch
+            {
+                DtmfKey.Zero => "0",
+                DtmfKey.One => "1",
+                DtmfKey.Two => "2",
+                DtmfKey.Three => "3",
+                DtmfKey.Four => "4",
+                DtmfKey.Five => "5",
+                DtmfKey.Six => "6",
+                DtmfKey.Seven => "7",
+                DtmfKey.Eight => "8",
+                DtmfKey.Nine => "9",
+                DtmfKey.Star => "*",
+                DtmfKey.Pound => "#",
+                _ => throw new ArgumentOutOfRangeException(nameof(key), key, null),
+            };
+        }
+
+        private bool IsAllowed(AssistantConfig assistant, Type toolType, FunctionToolMethodMetadata methodMetadata)
+        {
+            return assistant.AllowedTools.Any(allowed => ToolMatches(allowed, toolType, methodMetadata));
+        }
+
+        private static bool ToolMatches(string allowed, Type toolType, FunctionToolMethodMetadata methodMetadata)
+        {
+            return string.Equals(allowed, methodMetadata.FunctionName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(allowed, toolType.Name, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(allowed, toolType.FullName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        #region Validate Allowed Tools
+        private bool ValidateDtmfToolDefinitions()
+        {
+            (Type ToolType, FunctionToolMethodMetadata Method)[] availableTools = this._globalFunctionToolMethodMetadata
+                .Concat(this._privateFunctionToolMethodMetadata)
+                .SelectMany(entry => entry.Value.Select(method => (entry.Key, method)))
+                .ToArray();
+            List<string> errors = [];
+
+            foreach ((Type toolType, FunctionToolMethodMetadata method) in availableTools)
+            {
+                DtmfKey keys = method.Behavior?.DtmfKeys ?? DtmfKey.None;
+                ParameterInfo[] inputParameters = method.Method
+                    .GetParameters()
+                    .Where(parameter => parameter.ParameterType == typeof(DtmfInputResult))
+                    .ToArray();
+                string toolName = $"{toolType.FullName}.{method.FunctionName}";
+
+                if (keys == DtmfKey.None)
+                {
+                    if (inputParameters.Length != 0)
+                    {
+                        errors.Add($"Function tool '{toolName}' declares DtmfInputResult without DtmfKeys.");
+                    }
+                    continue;
+                }
+
+                if ((keys & ~SUPPORTED_DTMF_KEYS) != DtmfKey.None)
+                {
+                    errors.Add($"Function tool '{toolName}' contains unsupported DTMF keys.");
+                }
+                if (inputParameters.Length != 1)
+                {
+                    errors.Add($"DTMF-gated function tool '{toolName}' must declare exactly one DtmfInputResult parameter.");
+                }
+                if (string.IsNullOrWhiteSpace(method.Description))
+                {
+                    errors.Add($"DTMF-gated function tool '{toolName}' must declare a Description that explains its menu.");
+                }
+            }
+
+            foreach (AssistantConfig assistant in this.Config.AssistantConfigs)
+            {
+                foreach ((Type toolType, FunctionToolMethodMetadata method) in availableTools)
+                {
+                    if ((method.Behavior?.DtmfKeys ?? DtmfKey.None) != DtmfKey.None &&
+                        this.IsAllowed(assistant, toolType, method) &&
+                        !this.UsesFunctionCallIntent(assistant))
+                    {
+                        errors.Add($"Assistant '{assistant.DialingNumber}' authorizes DTMF-gated tool '{method.FunctionName}' but does not use FunctionCall intent.");
+                    }
+                }
+            }
+
+            foreach (string error in errors)
+            {
+                this.Logger.LogError("{ValidationError}", error);
+            }
+
+            return errors.Count == 0;
+        }
+
+        private bool UsesFunctionCallIntent(AssistantConfig assistant)
+        {
+            return this.Config.ModelConfig.ConfiguredSettings.TryGetValue("Intent", out Dictionary<string, Dictionary<string, string>>? intentSettings) &&
+                intentSettings.TryGetValue(assistant.Intent, out Dictionary<string, string>? intentSetting) &&
+                intentSetting.TryGetValue("Type", out string? intentType) &&
+                string.Equals(intentType, "FunctionCall", StringComparison.OrdinalIgnoreCase);
         }
 
         private bool ValidateAllowedTools()
@@ -355,9 +438,15 @@ namespace Agent.Telephone.Management
             (Type Type, FunctionToolMethodMetadata Method)[] availableTools =
                 this._globalFunctionToolMethodMetadata
                     .Concat(this._privateFunctionToolMethodMetadata)
-                    .SelectMany(
-                        entry => entry.Value.Select(method => (entry.Key, method)))
+                    .SelectMany(entry => entry.Value.Select(method => (entry.Key, method)))
                     .ToArray();
+
+            if (!availableTools.Any())
+            {
+                this.Logger.LogWarning("没有注册任何 FunctionTool，无法验证允许的工具。");
+                return true;
+            }
+
             IEnumerable<string> availableNames = availableTools.SelectMany(
                 tool => new[]
                 {
@@ -376,18 +465,7 @@ namespace Agent.Telephone.Management
             return errors.Count == 0;
         }
 
-        private static bool ToolMatches(
-            string allowed,
-            Type toolType,
-            FunctionToolMethodMetadata methodMetadata)
-        {
-            return string.Equals(allowed, methodMetadata.FunctionName, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(allowed, toolType.Name, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(allowed, toolType.FullName, StringComparison.OrdinalIgnoreCase);
-        }
-        private static IReadOnlyList<string> ValidateAllowedTools(
-            IEnumerable<AssistantConfig> assistants,
-            IEnumerable<string> availableTools)
+        private static IReadOnlyList<string> ValidateAllowedTools(IEnumerable<AssistantConfig> assistants, IEnumerable<string> availableTools)
         {
             ArgumentNullException.ThrowIfNull(assistants);
             ArgumentNullException.ThrowIfNull(availableTools);
@@ -407,20 +485,21 @@ namespace Agent.Telephone.Management
                 {
                     if (string.IsNullOrWhiteSpace(allowedTool) || !available.Contains(allowedTool))
                     {
-                        errors.Add(
-                            $"Assistant '{assistant.DialingNumber}' references unknown tool '{allowedTool}'.");
+                        errors.Add($"Assistant '{assistant.DialingNumber}' references unknown tool '{allowedTool}'.");
                     }
                 }
             }
 
             return errors;
         }
+        #endregion
 
         private ServerInfoAdapter CreateServerInfoAdapter()
         {
             return new ServerInfoAdapter(GlobalVariables.ServerName, this.Config);
         }
 
+        #region Release Tools
         private static async Task ReleasePrivateToolsAsync(IEnumerable<PrivateFunctionTool> tools)
         {
             List<Exception> errors = [];
@@ -463,14 +542,44 @@ namespace Agent.Telephone.Management
             }
         }
 
+        private void ReleaseGlobalTools()
+        {
+            foreach (FunctionTool instance in this._globalFunctionTools)
+            {
+                try
+                {
+                    instance.OnFunctionToolReleasedAsync()
+                        .AsTask()
+                        .GetAwaiter()
+                        .GetResult();
+                }
+                catch (Exception exception)
+                {
+                    this.Logger.LogError(exception, "释放全局 FunctionTool {ToolType} 失败。", instance.GetType().FullName);
+                }
+                finally
+                {
+                    if (instance is IDisposable disposable)
+                    {
+                        disposable.Dispose();
+                    }
+                }
+            }
+            this._globalFunctionTools.Clear();
+        }
+        #endregion
+
+        public override void Dispose()
+        {
+            this.ReleaseGlobalTools();
+        }
+
         private sealed class PrivateFunctionToolLifetime : IDisposable
         {
             private IReadOnlyList<PrivateFunctionTool>? _tools;
             private readonly ILogger _logger;
 
-            public PrivateFunctionToolLifetime(
-                IReadOnlyList<PrivateFunctionTool> tools,
-                ILogger logger)
+            public PrivateFunctionToolLifetime(IReadOnlyList<PrivateFunctionTool> tools, ILogger logger)
             {
                 this._tools = tools;
                 this._logger = logger;

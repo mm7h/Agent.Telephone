@@ -75,6 +75,8 @@ namespace Agent.Telephone
                 services.AddTransient<IStreamAudioPlayer, StreamAudioPlayer>();
                 services.AddSingleton<Func<IUrlAudioPlayer>>(serviceProvider =>
                     () => serviceProvider.GetRequiredService<IUrlAudioPlayer>());
+                services.AddSingleton<Func<IStreamAudioPlayer>>(serviceProvider =>
+                    () => serviceProvider.GetRequiredService<IStreamAudioPlayer>());
             });
             return builder;
         }

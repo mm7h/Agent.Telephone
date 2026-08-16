@@ -12,20 +12,17 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
     {
         private readonly ObjectPool<Workflow<MixedAudioPacket>> _mixedAudioWorkflowPool;
         private readonly ObjectPool<MixedAudioPacket> _mixedAudioPacketPool;
-        private readonly IOfflineDialogue _offlineDialogue;
         private IAudioProcessor? _audioProcessor;
 
         public AudioSendHandler(
             ObjectPool<Workflow<MixedAudioPacket>> mixedAudioWorkflowPool,
             ObjectPool<MixedAudioPacket> mixedAudioPacketPool,
-            IOfflineDialogue offlineDialogue,
             TelephoneConfig config,
             ILogger<AudioSendHandler> logger)
             : base(config, logger)
         {
             this._mixedAudioWorkflowPool = mixedAudioWorkflowPool;
             this._mixedAudioPacketPool = mixedAudioPacketPool;
-            this._offlineDialogue = offlineDialogue;
         }
 
         public override string HandlerName => HandlerNames.AudioSendHandlerName;
@@ -71,7 +68,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
             if (this.ActiveCallContext.IsAgentMediaPaused)
             {
-                await this.MarkFinalPlaybackAsync(workflow, fullyPlayed: false);
+                await this.DiscardFinalPlaybackAsync(workflow);
                 return;
             }
 
@@ -99,27 +96,89 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             catch (OperationCanceledException)
             {
-                await this.MarkFinalPlaybackAsync(workflow, fullyPlayed: false);
+                await this.DiscardFinalPlaybackAsync(workflow);
                 this.Logger.LogDebug("设备 {deviceId} 的混音音频发送已取消。", this.ActiveCallContext.DeviceId);
             }
             catch (Exception exception)
             {
-                await this.MarkFinalPlaybackAsync(workflow, fullyPlayed: false);
+                await this.DiscardFinalPlaybackAsync(workflow);
                 this.Logger.LogError(exception, "设备 {deviceId} 的混音音频发送失败。", this.ActiveCallContext.DeviceId);
             }
         }
 
-        private Task MarkFinalPlaybackAsync(
+        private async Task DiscardFinalPlaybackAsync(Workflow<MixedAudioPacket> workflow)
+        {
+            if (!workflow.Data.IsLastFrame)
+            {
+                return;
+            }
+
+            this.ActiveCallContext.CompletePromptPlayback(fullyPlayed: false);
+        }
+
+        private async Task MarkFinalPlaybackAsync(
             Workflow<MixedAudioPacket> workflow,
             bool fullyPlayed)
         {
-            return workflow.Data.IsLastFrame
-                ? this._offlineDialogue.MarkTurnPlaybackCompletedAsync(
-                    this.ActiveCallContext,
-                    workflow.TurnId,
-                    fullyPlayed,
-                    CancellationToken.None)
-                : Task.CompletedTask;
+            if (!workflow.Data.IsLastFrame)
+            {
+                return;
+            }
+
+            if (fullyPlayed && this.ActiveCallContext.IsPromptPlaybackPending)
+            {
+                try
+                {
+                    await Task.Delay(
+                        TimeSpan.FromMilliseconds(this.ActiveCallContext.PacketTimeMs),
+                        this.HandlerToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    fullyPlayed = false;
+                }
+            }
+
+            this.ActiveCallContext.CompletePromptPlayback(fullyPlayed);
+        }
+
+        protected override void OnHandlerTokenChanged()
+        {
+            if (this.ActiveCallContext.CallToken.IsCancellationRequested ||
+                this.HandlerToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            long interruptedTurnId = this.ActiveCallContext.TurnId - 1;
+            if (interruptedTurnId < 0)
+            {
+                return;
+            }
+
+            _ = this.DiscardInterruptedTurnAsync(interruptedTurnId);
+        }
+
+        private async Task DiscardInterruptedTurnAsync(long turnId)
+        {
+            try
+            {
+                await Task.CompletedTask;
+            }
+            catch (Exception exception)
+            {
+                this.Logger.LogWarning(
+                    exception,
+                    "丢弃被打断的通话 {CallId} 轮次 {TurnId} 时失败。",
+                    this.ActiveCallContext.CallId,
+                    turnId);
+            }
+        }
+
+        public override void Dispose()
+        {
+            this.ActiveCallContext.CompletePromptPlayback(fullyPlayed: false);
+            base.Dispose();
         }
     }
 }

@@ -6,7 +6,7 @@ namespace Agent.Telephone.Providers
 {
     internal interface IAsr : IProvider<ModelSetting>
     {
-        void RegisterDevice(string deviceId, IAsrEventCallback callback);
+        void RegisterDevice(ActiveCallContext activeCall, IAsrEventCallback callback);
         Task ConvertSpeechTextAsync(Workflow<float[]> workflow, int sampleRate, CancellationToken token);
     }
 }

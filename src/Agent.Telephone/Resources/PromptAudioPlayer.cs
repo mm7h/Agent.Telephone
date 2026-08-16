@@ -64,33 +64,64 @@ namespace Agent.Telephone.Resources
             return false;
         }
 
+        public Task<bool> PlayCachedAudioFilesAsync(
+            IReadOnlyList<string> relativeFilePaths,
+            int outputSampleRate,
+            Action<float[]> onAudioData,
+            CancellationToken cancellationToken)
+        {
+            if (relativeFilePaths.Count == 0)
+            {
+                return Task.FromResult(false);
+            }
+
+            var audioFiles = new List<byte[]>(relativeFilePaths.Count);
+            int totalLength = 0;
+            foreach (string relativeFilePath in relativeFilePaths)
+            {
+                if (!this._audioFileCaching.TryGetAudioBytes(relativeFilePath, out byte[]? audioBytes) ||
+                    audioBytes is null ||
+                    audioBytes.Length == 0)
+                {
+                    return Task.FromResult(false);
+                }
+
+                audioFiles.Add(audioBytes);
+                totalLength += audioBytes.Length;
+            }
+
+            byte[] combinedAudio = new byte[totalLength];
+            int offset = 0;
+            foreach (byte[] audioBytes in audioFiles)
+            {
+                Buffer.BlockCopy(audioBytes, 0, combinedAudio, offset, audioBytes.Length);
+                offset += audioBytes.Length;
+            }
+
+            return this.PlayCachedAudioAsync(
+                combinedAudio,
+                outputSampleRate,
+                onAudioData,
+                cancellationToken);
+        }
+
         public async Task<bool> PlayFileAsync(
             string filePath,
-            VoIPMediaSession mediaSession,
-            AudioFormat audioFormat,
+            int outputSampleRate,
             int packetTimeMs,
+            Action<float[]> onAudioData,
             CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath) ||
-                audioFormat.IsEmpty() || packetTimeMs <= 0)
+                outputSampleRate <= 0 || packetTimeMs <= 0)
             {
                 return false;
             }
 
             using IUrlAudioPlayer player = this._audioPlayerFactory();
-            Exception? sendFailure = null;
             void OnAudioData(float[] pcmData, bool _, bool __)
             {
-                try
-                {
-                    short[] pcm16 = pcmData.PcmFloatToShort();
-                    byte[] encoded = this._audioCodec.EncodeAudio(pcm16, audioFormat);
-                    mediaSession.SendAudio((uint)pcm16.Length, encoded);
-                }
-                catch (Exception exception)
-                {
-                    sendFailure ??= exception;
-                }
+                onAudioData(pcmData);
             }
 
             player.OnAudioDataAvailable += OnAudioData;
@@ -99,7 +130,7 @@ namespace Agent.Telephone.Resources
                 if (!await player.CheckFFmpegInstalledAsync(cancellationToken) ||
                     !await player.LoadAsync(
                         filePath,
-                        audioFormat.ClockRate,
+                        outputSampleRate,
                         outputChannels: 1,
                         packetTimeMs,
                         cancellationToken))
@@ -108,12 +139,6 @@ namespace Agent.Telephone.Resources
                 }
 
                 await player.PlayAsync(cancellationToken);
-                if (sendFailure is not null)
-                {
-                    this._logger.LogWarning(sendFailure, "播放音频文件 {Path} 时发送 RTP 失败。", filePath);
-                    return false;
-                }
-
                 return true;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -133,6 +158,38 @@ namespace Agent.Telephone.Resources
 
         public void Dispose()
         {
+        }
+
+        private async Task<bool> PlayCachedAudioAsync(
+            byte[] audioBytes,
+            int outputSampleRate,
+            Action<float[]> onAudioData,
+            CancellationToken cancellationToken)
+        {
+            if (outputSampleRate <= 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                int sampleCount = audioBytes.Length / sizeof(short);
+                var source = new short[sampleCount];
+                Buffer.BlockCopy(audioBytes, 0, source, 0, sampleCount * sizeof(short));
+                short[] resampled = PcmResampler.Resample(source, CachedSampleRate, outputSampleRate);
+                onAudioData(resampled.PcmShortToFloat());
+                return true;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return false;
+            }
+            catch (Exception exception)
+            {
+                this._logger.LogWarning(exception, "播放缓存提示音失败。");
+                return false;
+            }
         }
 
         private async Task<bool> PlayCachedAudioAsync(

@@ -1,17 +1,17 @@
-using Agent.Telephone.Abstractions.Common.Enums;
+﻿using Agent.Telephone.Abstractions.Common.Enums;
 
 namespace Agent.Telephone.Abstractions.Common.Contexts
 {
     /// <summary>
-    /// Contains the result of an assistant switch request.
+    /// 助手语音切换的结果。
     /// </summary>
-    /// <param name="Status">The assistant switch status.</param>
-    /// <param name="TargetAssistantNumber">The requested assistant dialing number.</param>
-    /// <param name="Message">An optional message that describes the result.</param>
+    /// <param name="Status">助手切换状态。</param>
+    /// <param name="TargetAssistantNumber">请求的助手拨号号码。</param>
+    /// <param name="Message">描述结果的可选消息。</param>
     public sealed record AssistantSwitchResult(AssistantSwitchStatus Status, string TargetAssistantNumber, string? Message = null)
     {
         /// <summary>
-        /// Gets a value indicating whether the switch request was accepted.
+        /// 切换请求是否被接受。
         /// </summary>
         public bool Succeeded => this.Status == AssistantSwitchStatus.Accepted;
     }

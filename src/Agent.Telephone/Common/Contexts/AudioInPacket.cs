@@ -6,6 +6,8 @@ namespace Agent.Telephone.Common.Contexts
     {
         private bool _released;
         private const int DEFAULT_BUFFER_CAPACITY = 960 * 100;
+        // Preserve the entire Silero VAD voice-confirmation window before trimming silence.
+        private const int PRE_SPEECH_BUFFER_SAMPLES = 512 * 8;
         private readonly CircularBuffer _audioBuffer;
 
         public AudioInPacket()
@@ -82,7 +84,7 @@ namespace Agent.Telephone.Common.Contexts
             this._audioBuffer.Dispose();
         }
 
-        public void TrimOldAudio(int keepFrames = 1024)
+        public void TrimOldAudio(int keepFrames = PRE_SPEECH_BUFFER_SAMPLES)
         {
             if (!this._released && this._audioBuffer.Size > keepFrames)
             {

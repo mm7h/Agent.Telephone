@@ -1,12 +1,11 @@
-﻿using Agent.Telephone.Abstractions.Common.Enums;
+﻿using System.Threading.Channels;
+using Agent.Telephone.Abstractions.Common.Enums;
 using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Providers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
-using SIPSorcery.Media;
 using SIPSorceryMedia.Abstractions;
-using System.Threading.Channels;
 
 namespace Agent.Telephone.Handlers.AIAdapterHandlers
 {
@@ -84,13 +83,29 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 this.HandlerToken.ThrowIfCancellationRequested();
                 OutAudioSegment segment = workflow.Data;
                 AudioFormat format = this.ActiveCallContext.NegotiatedAudioFormat;
-                if (format.IsEmpty() || this.ActiveCallContext.PacketTimeMs <= 0 ||
-                    !this._audioProcessor.InitializeMixer(
-                        format.ClockRate,
-                        outputChannels: 1,
-                        this.ActiveCallContext.PacketTimeMs))
+                if (format.IsEmpty())
                 {
-                    this.Logger.LogWarning("设备 {deviceId} 的混音器尚未就绪。", this.ActiveCallContext.DeviceId);
+                    this.Logger.LogWarning("设备 {deviceId} 尚未协商 RTP 音频格式，暂不处理混音音频。", this.ActiveCallContext.DeviceId);
+                    return;
+                }
+
+                if (this.ActiveCallContext.PacketTimeMs <= 0)
+                {
+                    this.Logger.LogWarning("设备 {deviceId} 的 RTP ptime 无效，暂不处理混音音频。", this.ActiveCallContext.DeviceId);
+                    return;
+                }
+
+                if (!this._audioProcessor.InitializeMixer(
+                    format.ClockRate,
+                    outputChannels: 1,
+                    this.ActiveCallContext.PacketTimeMs))
+                {
+                    this.Logger.LogError(
+                        "设备 {deviceId} 无法为 {codec}/{sampleRate}Hz、ptime={ptime}ms 初始化混音器。",
+                        this.ActiveCallContext.DeviceId,
+                        format.Codec,
+                        format.ClockRate,
+                        this.ActiveCallContext.PacketTimeMs);
                     return;
                 }
 
@@ -163,7 +178,6 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 this._audioProcessor.OnMixedAudioDataAvailable -= this.OnMixedAudioDataAvailableAsync;
             }
 
-            this.NextWriter?.TryComplete();
             base.Dispose();
         }
     }

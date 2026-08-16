@@ -1,9 +1,11 @@
-using Agent.Telephone.Abstractions.Common.Enums;
+﻿using Agent.Telephone.Abstractions.Common.Enums;
 using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Constants;
+using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Helpers;
 using Agent.Telephone.Media.Abstractions;
 using Agent.Telephone.Media.Abstractions.Dtos;
+using Agent.Telephone.Resources;
 using Microsoft.Extensions.Logging;
 using SIPSorcery.Media;
 using SIPSorceryMedia.Abstractions;
@@ -16,18 +18,26 @@ namespace Agent.Telephone.Providers.AudioProcessor
         private readonly ISIPSorceryAudioCodec _audioCodec;
         private readonly IAudioMixer _audioMixer;
         private readonly IAudioSubtitleRegister _audioSubtitleRegister;
+        private readonly TelephoneConfig _config;
+        private readonly IAudioPromptPlayer _audioPromptPlayer;
         private int _mixerSampleRate;
+
+        private const float InboundAudioGain = 15.848932f;
 
         public DefaultAudioProcessor(
             ISIPSorceryAudioCodec audioCodec,
             IAudioMixer audioMixer,
             IAudioSubtitleRegister audioSubtitleRegister,
+            TelephoneConfig config,
+            IAudioPromptPlayer audioPromptPlayer,
             ILogger<DefaultAudioProcessor> logger)
             : base(logger)
         {
             this._audioCodec = audioCodec;
             this._audioMixer = audioMixer;
             this._audioSubtitleRegister = audioSubtitleRegister;
+            this._config = config;
+            this._audioPromptPlayer = audioPromptPlayer;
             this._audioMixer.OnMixedAudioDataAvailable += this.FireOnMixedAudioData;
         }
 
@@ -59,6 +69,63 @@ namespace Agent.Telephone.Providers.AudioProcessor
             return true;
         }
 
+        public bool TryBeginInitialGreeting(ActiveCallContext activeCall, bool isInbound)
+        {
+            if (!IsInitialGreetingCall(isInbound, activeCall.AssistantConfig, this._config.AssistantConfigs))
+            {
+                return false;
+            }
+
+            activeCall.PauseUserAudioInput();
+            return true;
+        }
+
+        public void StartInitialGreeting(
+            ActiveCallContext activeCall,
+            Func<string, string, string, CancellationToken, Task<bool>> synthesizePrompt)
+        {
+            if (!activeCall.TryAcquireUse(out IDisposable? lease) || lease is null)
+            {
+                return;
+            }
+
+            _ = this.PlayInitialGreetingAsync(
+                activeCall,
+                synthesizePrompt,
+                lease);
+        }
+
+        public Task<bool> PlayCachedPromptAsync(
+            ActiveCallContext activeCall,
+            IReadOnlyList<string> relativeFilePaths,
+            CancellationToken cancellationToken)
+        {
+            return this.PlayPromptAsync(
+                activeCall,
+                onAudioData => this._audioPromptPlayer.PlayCachedAudioFilesAsync(
+                    relativeFilePaths,
+                    activeCall.NegotiatedAudioFormat.ClockRate,
+                    onAudioData,
+                    cancellationToken),
+                cancellationToken);
+        }
+
+        public Task<bool> PlayFilePromptAsync(
+            ActiveCallContext activeCall,
+            string filePath,
+            CancellationToken cancellationToken)
+        {
+            return this.PlayPromptAsync(
+                activeCall,
+                onAudioData => this._audioPromptPlayer.PlayFileAsync(
+                    filePath,
+                    activeCall.NegotiatedAudioFormat.ClockRate,
+                    activeCall.PacketTimeMs,
+                    onAudioData,
+                    cancellationToken),
+                cancellationToken);
+        }
+
         public Task<float[]> DecodeAsync(byte[] encodedData, AudioFormat format, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
@@ -69,7 +136,17 @@ namespace Agent.Telephone.Providers.AudioProcessor
                 pcm16,
                 format.ClockRate,
                 AudioProcessSettings.OutputToModelSampleRate);
-            return Task.FromResult(resampled.PcmShortToFloat());
+            float[] pcmData = resampled.PcmShortToFloat();
+            ApplyInboundAudioGain(pcmData);
+            return Task.FromResult(pcmData);
+        }
+
+        internal static void ApplyInboundAudioGain(float[] audioData)
+        {
+            for (int index = 0; index < audioData.Length; index++)
+            {
+                audioData[index] = Math.Clamp(audioData[index] * InboundAudioGain, -1f, 1f);
+            }
         }
 
         public Task<byte[]> EncodeAsync(float[] pcmData, AudioFormat format, CancellationToken token)
@@ -144,6 +221,161 @@ namespace Agent.Telephone.Providers.AudioProcessor
             {
                 throw new NotSupportedException($"不支持的电话音频编码：{format.Codec}。");
             }
+        }
+
+        private async Task PlayInitialGreetingAsync(
+            ActiveCallContext activeCall,
+            Func<string, string, string, CancellationToken, Task<bool>> synthesizePrompt,
+            IDisposable lease)
+        {
+            using (lease)
+            {
+                try
+                {
+                    string? helloMessage = this.GetHelloMessage();
+                    if (helloMessage is null)
+                    {
+                        this.Logger.LogWarning("客服首呼问候文本为空，设备 {DeviceId} 将直接进入正常通话。", activeCall.DeviceId);
+                        return;
+                    }
+
+                    IReadOnlyList<string> audioFiles = GetGreetingAudioFiles(activeCall.AssistantConfig.DialingNumber);
+                    if (audioFiles.Count == 0)
+                    {
+                        this.Logger.LogWarning("客服号码 {AssistantNumber} 不是纯数字，无法播放首呼问候。", activeCall.AssistantConfig.DialingNumber);
+                        return;
+                    }
+
+                    activeCall.MarkPlayingPrompt();
+                    bool fixedAudioPlayed = await this.PlayCachedPromptAsync(
+                        activeCall,
+                        audioFiles,
+                        activeCall.CallToken);
+                    if (!fixedAudioPlayed)
+                    {
+                        this.Logger.LogWarning("客服首呼固定音频播放失败，设备 {DeviceId} 将直接进入正常通话。", activeCall.DeviceId);
+                        return;
+                    }
+
+                    Task<bool> playbackCompleted = activeCall.BeginPromptPlayback();
+                    if (playbackCompleted.IsCompleted)
+                    {
+                        this.Logger.LogWarning("客服首呼 TTS 播放已被占用，设备 {DeviceId} 将直接进入正常通话。", activeCall.DeviceId);
+                        return;
+                    }
+
+                    bool synthesisStarted = await synthesizePrompt(
+                        helloMessage,
+                        $"greeting-{activeCall.CallId}",
+                        $"greeting-{Guid.NewGuid():N}",
+                        activeCall.CallToken);
+                    if (!synthesisStarted)
+                    {
+                        this.Logger.LogWarning("客服首呼 TTS 合成失败，设备 {DeviceId} 将直接进入正常通话。", activeCall.DeviceId);
+                        return;
+                    }
+
+                    if (!await playbackCompleted.WaitAsync(activeCall.CallToken))
+                    {
+                        this.Logger.LogWarning("客服首呼 TTS 未完整播放，设备 {DeviceId} 将直接进入正常通话。", activeCall.DeviceId);
+                    }
+                }
+                catch (OperationCanceledException) when (activeCall.CallToken.IsCancellationRequested)
+                {
+                }
+                catch (Exception exception)
+                {
+                    this.Logger.LogWarning(exception, "播放客服首呼问候失败，设备 {DeviceId} 将直接进入正常通话。", activeCall.DeviceId);
+                }
+                finally
+                {
+                    activeCall.CompletePromptPlayback(fullyPlayed: false);
+                    if (!activeCall.CallToken.IsCancellationRequested)
+                    {
+                        activeCall.ResumeUserAudioInput();
+                        activeCall.DeviceContext.MarkCallConnected(activeCall);
+                    }
+                }
+            }
+        }
+
+        private async Task<bool> PlayPromptAsync(
+            ActiveCallContext activeCall,
+            Func<Action<float[]>, Task<bool>> supplyAudio,
+            CancellationToken cancellationToken)
+        {
+            AudioFormat format = activeCall.NegotiatedAudioFormat;
+            if (format.IsEmpty() || !this.InitializeMixer(format.ClockRate, outputChannels: 1, activeCall.PacketTimeMs))
+            {
+                return false;
+            }
+
+            Task<bool> playbackCompleted = activeCall.BeginPromptPlayback();
+            if (playbackCompleted.IsCompleted)
+            {
+                return false;
+            }
+
+            bool streamCompleted = false;
+            try
+            {
+                bool supplied = await supplyAudio(audioData =>
+                    this.ProcessAudio(AudioType.SystemNotification, audioData, sentenceId: null));
+                if (!supplied)
+                {
+                    return false;
+                }
+
+                this.CompleteStream(AudioType.SystemNotification);
+                streamCompleted = true;
+                return await playbackCompleted.WaitAsync(cancellationToken);
+            }
+            finally
+            {
+                if (!streamCompleted)
+                {
+                    this.CompleteStream(AudioType.SystemNotification);
+                }
+
+                activeCall.CompletePromptPlayback(fullyPlayed: false);
+            }
+        }
+
+        private string? GetHelloMessage()
+        {
+            string[] templates = this._config.PromptConfig.HelloMessageTempletes
+                .Where(static template => !string.IsNullOrWhiteSpace(template))
+                .ToArray();
+            return templates.Length == 0
+                ? null
+                : templates[Random.Shared.Next(templates.Length)];
+        }
+
+        internal static bool IsInitialGreetingCall(bool isInbound, AssistantConfig assistant, IReadOnlyList<AssistantConfig> assistantConfigs)
+        {
+            return isInbound &&
+                assistantConfigs.Count > 0 &&
+                string.Equals(
+                    assistant.DialingNumber,
+                    assistantConfigs[0].DialingNumber,
+                    StringComparison.Ordinal);
+        }
+
+        internal static IReadOnlyList<string> GetGreetingAudioFiles(string assistantNumber)
+        {
+            if (string.IsNullOrWhiteSpace(assistantNumber) || assistantNumber.Any(static character => character < '0' || character > '9'))
+            {
+                return [];
+            }
+
+            var paths = new List<string>(assistantNumber.Length + 1);
+            foreach (char character in assistantNumber)
+            {
+                paths.Add($"numbers/{character}.mp3");
+            }
+
+            paths.Add(PromptAudioSettings.GreetingServiceAgentAudio);
+            return paths;
         }
     }
 }

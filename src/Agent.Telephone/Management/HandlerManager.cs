@@ -48,12 +48,22 @@ namespace Agent.Telephone.Management
             return this.BuildHandlersAsync(deviceContext, sipRequest);
         }
 
+        /// <summary>
+        /// 角色切换时，直接构建处理程序管道，不需要 SIPRequest
+        /// </summary>
+        /// <param name="deviceContext"></param>
+        /// <returns></returns>
         public Task<bool> BuildForConnectedCallAsync(DeviceContext deviceContext)
         {
             return this.BuildHandlersAsync(deviceContext, answerRequest: null);
         }
 
-        private async Task<bool> BuildHandlersAsync(DeviceContext deviceContext, SIPRequest? answerRequest)
+        public Task<bool> BuildForCallbackCallAsync(DeviceContext deviceContext, string messageId)
+        {
+            return this.BuildHandlersAsync(deviceContext, answerRequest: null, callbackMessageId: messageId);
+        }
+
+        private async Task<bool> BuildHandlersAsync(DeviceContext deviceContext, SIPRequest? answerRequest, string? callbackMessageId = null)
         {
             ActiveCallContext? activeCallContext = deviceContext.ActiveCall;
             if (activeCallContext is null)
@@ -62,9 +72,7 @@ namespace Agent.Telephone.Management
                 return false;
             }
 
-            ActiveCallHandler? activeCallHandler = answerRequest is null
-                ? null
-                : this.ServiceProvider.GetRequiredService<ActiveCallHandler>();
+            ActiveCallHandler? activeCallHandler = answerRequest is null ? null : this.ServiceProvider.GetRequiredService<ActiveCallHandler>();
             var rtp = this.ServiceProvider.GetRequiredService<RTPHandler>();
             var audioReceived = this.ServiceProvider.GetRequiredService<AudioReceivedHandler>();
             var audio2Text = this.ServiceProvider.GetRequiredService<Audio2TextHandler>();
@@ -84,7 +92,9 @@ namespace Agent.Telephone.Management
                 [audioSend.HandlerName] = audioSend
             };
 
-            HandlerPipelineLifetime? pipelineLifetime = null;
+            List<Action> completeWriters = [];
+            List<Task> handlerTasks = [];
+            bool pipelineInitialized = false;
             try
             {
                 if (activeCallHandler is not null)
@@ -116,26 +126,44 @@ namespace Agent.Telephone.Management
                     }
                 }
 
-                List<Action> completeWriters = [];
-                List<Task> handlerTasks = [];
                 this.BuildHandlersWorkflow(rtp, audioReceived, completeWriters, handlerTasks);
                 this.BuildHandlersWorkflow(audioReceived, audio2Text, completeWriters, handlerTasks);
                 this.BuildHandlersWorkflow(audio2Text, dialogue, completeWriters, handlerTasks);
                 this.BuildHandlersWorkflow(dialogue, text2Audio, completeWriters, handlerTasks);
                 this.BuildHandlersWorkflow(text2Audio, audioProcessor, completeWriters, handlerTasks);
                 this.BuildHandlersWorkflow(audioProcessor, audioSend, completeWriters, handlerTasks);
-                pipelineLifetime = new HandlerPipelineLifetime(handlerContainer.Values.ToArray(), completeWriters, handlerTasks, this.Logger);
-                activeCallContext.AIAgentContext.RegisterOwnedResource(pipelineLifetime);
-                pipelineLifetime = null;
+
+                activeCallContext.AIAgentContext.HandlerPipeline.InitHandlerPipeline(
+                    handlerContainer.Values.ToArray(),
+                    completeWriters,
+                    handlerTasks,
+                    this.Logger);
+                pipelineInitialized = true;
             }
             catch (Exception exception)
             {
-                if (pipelineLifetime is not null)
+                if (pipelineInitialized)
                 {
-                    pipelineLifetime.Dispose();
+                    activeCallContext.AIAgentContext.HandlerPipeline.Dispose();
                 }
                 else
                 {
+                    foreach (Action complete in completeWriters)
+                    {
+                        complete();
+                    }
+
+                    try
+                    {
+                        Task.WhenAll(handlerTasks).GetAwaiter().GetResult();
+                    }
+                    catch (Exception handlerException)
+                    {
+                        this.Logger.LogWarning(
+                            handlerException,
+                            "处理程序管道构建失败后的后台任务结束异常。");
+                    }
+
                     activeCallHandler?.Dispose();
                     foreach (IHandler handler in handlerContainer.Values)
                     {
@@ -151,17 +179,30 @@ namespace Agent.Telephone.Management
 
             if (answerRequest is null)
             {
+                if (!string.IsNullOrWhiteSpace(callbackMessageId))
+                {
+                    IOfflineDialogue callbackOfflineDialogue = activeCallContext.AIAgentContext.PrivateProvider.OfflineDialogue
+                        ?? throw new InvalidOperationException("The offline dialogue provider is not initialized.");
+                    await callbackOfflineDialogue.PlayAssistantMessageAsync(
+                        activeCallContext,
+                        callbackMessageId,
+                        text2Audio.SynthesizePromptAsync,
+                        activeCallContext.CallToken);
+                }
                 return true;
             }
 
             bool answered = await activeCallHandler!.AnswerAsync(answerRequest);
-            if (answered)
+            if (!answered)
             {
-                this.ServiceProvider
-                    .GetRequiredService<IOfflineDialogue>()
-                    .StartPlayback(activeCallContext);
+                return false;
             }
-            return answered;
+
+            IOfflineDialogue offlineDialogue = activeCallContext.AIAgentContext.PrivateProvider.OfflineDialogue
+                ?? throw new InvalidOperationException("The offline dialogue provider is not initialized.");
+
+            await offlineDialogue.StartInitialCallFlowAsync(activeCallContext, text2Audio.SynthesizePromptAsync, activeCallContext.CallToken);
+            return true;
         }
 
         private void InitializeActiveCallContext(ActiveCallContext activeCallContext, IHandler handler)

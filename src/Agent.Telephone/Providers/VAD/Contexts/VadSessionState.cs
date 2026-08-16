@@ -48,6 +48,11 @@ namespace Agent.Telephone.Providers.VAD.Contexts
         public bool VoiceStop { get; set; }
 
         /// <summary>
+        /// Number of consecutive VAD frames classified as silence after speech started.
+        /// </summary>
+        public int SilenceFrameCount { get; set; }
+
+        /// <summary>
         /// Sliding window to track voice activity across multiple frames.
         /// </summary>
         public Queue<bool> VoiceWindow { get; private set; }
@@ -87,6 +92,7 @@ namespace Agent.Telephone.Providers.VAD.Contexts
             AnalyzedIndex = 0;
             LastIsVoice = false;
             VoiceStop = false;
+            SilenceFrameCount = 0;
             VoiceWindow.Clear();
         }
     }

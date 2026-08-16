@@ -28,24 +28,24 @@ namespace Agent.Telephone
 
         public IHostBuilder HostBuilder { get; private set; }
 
-        public IServerBuilder Initialize(TelephoneConfig config, IMessageStore messageStore)
+        public IServerBuilder Initialize(TelephoneConfig config, ITelephoneStore telephoneStore)
         {
-            return this.Initialize(config, DefaultMemoryStore.Default, messageStore);
+            return this.Initialize(config, DefaultMemoryStore.Default, telephoneStore);
         }
 
-        private IServerBuilder Initialize(TelephoneConfig config, IStore connectionStore, IMessageStore messageStore)
+        private IServerBuilder Initialize(TelephoneConfig config, IStore connectionStore, ITelephoneStore telephoneStore)
         {
             if (config == null)
             {
                 throw new ArgumentNullException(nameof(config), "TelephoneConfig cannot be null.");
             }
-            ArgumentNullException.ThrowIfNull(messageStore);
+            ArgumentNullException.ThrowIfNull(telephoneStore);
 
             this.HostBuilder = this.HostBuilder.ConfigureServices((context, services) =>
             {
                 services.AddSingleton(config);
                 services.AddSingleton(connectionStore);
-                services.AddSingleton<IMessageStore>(messageStore);
+                services.AddSingleton<ITelephoneStore>(telephoneStore);
 
             })
             .RegisterLogger(config)

@@ -1,4 +1,4 @@
-using Agent.Telephone.Abstractions.Configs;
+﻿using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Providers;
@@ -36,7 +36,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 return false;
             }
             this._asr = privateProvider.Asr;
-            this._asr.RegisterDevice(this.ActiveCallContext.DeviceId, this);
+            this._asr.RegisterDevice(this.ActiveCallContext, this);
 
             this.RegisterCancellationToken(this.ActiveCallContext);
             return true;
@@ -71,7 +71,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
             try
             {
-                await this._asr.ConvertSpeechTextAsync(workflow, AudioProcessSettings.ModelToInputSampleRate, this.HandlerToken);
+                await this._asr.ConvertSpeechTextAsync(workflow, AudioProcessSettings.OutputToModelSampleRate, this.HandlerToken);
             }
             catch (OperationCanceledException)
             {
@@ -83,7 +83,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
         }
 
-        public void OnSpeechTextConverted(bool success, string text)
+        public async void OnSpeechTextConverted(bool success, string text)
         {
             if (!success)
             {
@@ -102,11 +102,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             workflow.Initialize(this.ActiveCallContext, text);
             try
             {
-                this.NextWriter
-                    .WriteAsync(workflow, this.HandlerToken)
-                    .AsTask()
-                    .GetAwaiter()
-                    .GetResult();
+                await this.NextWriter.WriteAsync(workflow, this.HandlerToken);
             }
             catch (OperationCanceledException)
             {
@@ -120,11 +116,6 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
         public override void Dispose()
         {
-            if (this._asr is not null)
-            {
-                this._asr.UnregisterDevice(this.ActiveCallContext.DeviceId);
-            }
-            this.NextWriter?.TryComplete();
             base.Dispose();
         }
     }

@@ -2,10 +2,8 @@
 using Agent.Telephone.Common.BuildConfigs;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Helpers;
+using Agent.Telephone.Media.Abstractions;
 using Agent.Telephone.Providers.ASR.Contexts;
-using Agent.Telephone.Resources;
-using IAudioEditor = Agent.Telephone.Media.Abstractions.IAudioEditor;
-using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.Logging;
 using SherpaOnnx;
 using System.Collections.Concurrent;
@@ -64,21 +62,23 @@ namespace Agent.Telephone.Providers.ASR.Sherpa
                 Directory.CreateDirectory(this.AudioSavingConfig.SavePath);
             }
             this._offlineRecognizer = new OfflineRecognizer(offlineRecognizerConfig);
-            this._backgroudProcessingTask = Task.Run(this.Processing);
+            this._backgroudProcessingTask = Task.Run(this.ProcessingAsync);
         }
 
-        public void RegisterDevice(string deviceId, IAsrEventCallback callback)
+        public void RegisterDevice(ActiveCallContext activeCall, IAsrEventCallback callback)
         {
-            this._asrSessions.AddOrUpdate(deviceId, callback, (_, _) => callback);
-            this.Logger.LogDebug("已注册 ASR 会话，设备: {deviceId}", deviceId);
+            this._asrSessions.AddOrUpdate(activeCall.DeviceId, callback, (_, _) => callback);
+            base.RegisterDevice(activeCall);
+            this.Logger.LogDebug("已注册 ASR 会话，设备: {deviceId}", activeCall.DeviceId);
         }
 
-        public override void UnregisterDevice(string deviceId)
+        public override void UnregisterDevice(ActiveCallContext activeCall)
         {
-            if (this._asrSessions.TryRemove(deviceId, out _))
+            if (this._asrSessions.TryRemove(activeCall.DeviceId, out _))
             {
-                this.Logger.LogDebug("已注销 ASR 会话，设备: {deviceId}", deviceId);
+                this.Logger.LogDebug("已注销 ASR 会话，设备: {deviceId}", activeCall.DeviceId);
             }
+            base.UnregisterDevice(activeCall);
         }
 
         public override bool CheckDeviceRegistered(string deviceId)
@@ -104,10 +104,25 @@ namespace Agent.Telephone.Providers.ASR.Sherpa
                 {
                     if (this.AudioSavingConfig is not null && this.AudioSavingConfig.SaveFile)
                     {
-                        string fileName = this.GenerateAudioFileName(workflow);
-                        string filePath = Path.Combine(this.AudioSavingConfig.SavePath, $"{this.ProviderType}_{fileName}.{this.AudioSavingConfig.Format}");
+                        string fileName = FileNameHelper.CreateAudioFileName(
+                            this.ProviderType,
+                            workflow.CallerNumber,
+                            workflow.DialedNumber,
+                            workflow.TurnId.ToString(),
+                            this.AudioSavingConfig.Format);
+                        string filePath = Path.Combine(this.AudioSavingConfig.SavePath, fileName);
 
-                        bool userSpeechFileSavingResult = await this._audioEditor.SaveAudioFileAsync(filePath, workflow.Data);
+                        int outputSampleRate = this.GetNegotiatedAudioSavingSampleRate();
+                        float[] savedAudio = ResampleForAudioSaving(
+                            workflow.Data,
+                            sampleRate,
+                            outputSampleRate);
+                        bool userSpeechFileSavingResult = await this._audioEditor.SaveAudioFileAsync(
+                            filePath,
+                            savedAudio,
+                            outputSampleRate,
+                            channels: 1,
+                            bitRate: 128000);
                         if (userSpeechFileSavingResult)
                         {
                             this.Logger.LogDebug("用户语音音频文件 {fileName} 保存成功。", fileName);
@@ -143,12 +158,7 @@ namespace Agent.Telephone.Providers.ASR.Sherpa
             }
         }
 
-        private string GenerateAudioFileName<T>(Workflow<T> workflow)
-        {
-            return $"{this.DeviceId}_{workflow.TurnId}";
-        }
-
-        private async Task Processing()
+        private async Task ProcessingAsync()
         {
             if (this._offlineRecognizer == null)
             {

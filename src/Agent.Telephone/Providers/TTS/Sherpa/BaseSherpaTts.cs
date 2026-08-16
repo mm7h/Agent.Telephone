@@ -1,15 +1,14 @@
-﻿using Agent.Telephone.Abstractions.Configs;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.BuildConfigs;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Common.Enums;
 using Agent.Telephone.Helpers;
-using Agent.Telephone.Resources;
-using IAudioEditor = Agent.Telephone.Media.Abstractions.IAudioEditor;
+using Agent.Telephone.Media.Abstractions;
 using Microsoft.Extensions.Logging;
 using SherpaOnnx;
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
 
 namespace Agent.Telephone.Providers.TTS.Sherpa
 {
@@ -51,20 +50,22 @@ namespace Agent.Telephone.Providers.TTS.Sherpa
             this._offlineTts = new OfflineTts(offlineTtsConfig);
         }
 
-        public void RegisterDevice(string deviceId, ITtsEventCallback callback)
+        public void RegisterDevice(ActiveCallContext activeCall, ITtsEventCallback callback)
         {
-            this._ttsSessions.TryAdd(deviceId, callback);
+            this._ttsSessions.TryAdd(activeCall.DeviceId, callback);
+            base.RegisterDevice(activeCall);
         }
 
         public string? GetSavedAudioFilePath(string sentenceId) =>
             this._savedAudioPaths.TryGetValue(sentenceId, out string? path) ? path : null;
 
-        public override void UnregisterDevice(string deviceId)
+        public override void UnregisterDevice(ActiveCallContext activeCall)
         {
-            if (this._ttsSessions.TryRemove(deviceId, out _))
+            if (this._ttsSessions.TryRemove(activeCall.DeviceId, out _))
             {
-                this.Logger.LogDebug("已注销设备 {deviceId} 的 TTS 会话", deviceId);
+                this.Logger.LogDebug("已注销设备 {deviceId} 的 TTS 会话", activeCall.DeviceId);
             }
+            base.UnregisterDevice(activeCall);
         }
 
         public override bool CheckDeviceRegistered(string deviceId)
@@ -139,14 +140,29 @@ namespace Agent.Telephone.Providers.TTS.Sherpa
 
                     if (this.AudioSavingConfig is not null && this.AudioSavingConfig.SaveFile)
                     {
-                        string fileName = $"{this.ProviderType}_{segment.SentenceId}.{this.AudioSavingConfig.Format}";
+                        string fileName = FileNameHelper.CreateAudioFileName(
+                            this.ProviderType,
+                            workflow.CallerNumber,
+                            workflow.DialedNumber,
+                            FileNameHelper.GetIndex(segment.SentenceId, workflow.DeviceId),
+                            this.AudioSavingConfig.Format);
                         string filePath = Path.Combine(this.AudioSavingConfig.SavePath, fileName);
                         if (File.Exists(filePath))
                         {
                             this.Logger.LogWarning("TTS 文件 {fileName} 已存在，将被覆盖。", fileName);
                             File.Delete(filePath);
                         }
-                        bool saved = await this._audioEditor.SaveAudioFileAsync(filePath, audio.Samples, this.GetTtsSampleRate(), 1, 128000);
+                        int outputSampleRate = this.GetNegotiatedAudioSavingSampleRate();
+                        float[] savedAudio = ResampleForAudioSaving(
+                            audio.Samples,
+                            this.GetTtsSampleRate(),
+                            outputSampleRate);
+                        bool saved = await this._audioEditor.SaveAudioFileAsync(
+                            filePath,
+                            savedAudio,
+                            outputSampleRate,
+                            channels: 1,
+                            bitRate: 128000);
                         if (saved)
                         {
                             this._savedAudioPaths[segment.SentenceId] = filePath;

@@ -1,5 +1,6 @@
 ﻿using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Abstractions.Store;
+using Agent.Telephone.Abstractions.Persistence;
 using Agent.Telephone.Providers.CallControl.Reservations;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Helpers;
@@ -15,6 +16,7 @@ namespace Agent.Telephone.Management
     internal class DeviceContextManager : BaseManager, IRegisteredEndpointDirectory
     {
         private readonly IStore _connectionStore;
+        private readonly ITelephoneStore? _telephoneStore;
         private readonly object _deviceLock = new();
         private readonly TransferReservationRegistry _reservations;
 
@@ -27,6 +29,7 @@ namespace Agent.Telephone.Management
             : base(serviceProvider, config, logger)
         {
             this._connectionStore = store;
+            this._telephoneStore = serviceProvider.GetService<ITelephoneStore>();
             this._reservations = reservations;
         }
 
@@ -42,19 +45,72 @@ namespace Agent.Telephone.Management
 
         public override bool BuildComponent() => true;
 
-        public override Task OnSIPDeviceRegisteringAsync(SIPTransport sipTransport, SIPRequest sipRequest)
+        public override async Task OnSIPDeviceRegisteringAsync(SIPTransport sipTransport, SIPRequest sipRequest)
         {
             (SIPURI contact, int expiresSeconds) = sipRequest.GetRegistration();
             if (expiresSeconds == 0)
             {
+                if (this._telephoneStore is not null)
+                {
+                    await this._telephoneStore.RemoveDeviceRegistrationAsync(sipRequest.GetDeviceId());
+                }
+
                 this.UnregisterSIPDevice(sipRequest);
             }
             else
             {
+                DateTimeOffset now = DateTimeOffset.Now;
+                if (this._telephoneStore is not null)
+                {
+                    DeviceContext? existing = this.GetSIPDeviceById(sipRequest);
+                    DateTimeOffset registeredAt = existing?.Registration?.RegisteredAt ?? now;
+                    await this._telephoneStore.SaveDeviceRegistrationAsync(new DeviceRegistrationRecord(
+                        sipRequest.GetDeviceId(),
+                        sipRequest.GetCallerAor().ToString(),
+                        contact.ToString(),
+                        registeredAt,
+                        now,
+                        now.AddSeconds(expiresSeconds)));
+                }
+
                 this.GetOrRegisterSIPDevice(sipTransport, sipRequest, contact, expiresSeconds);
             }
+        }
 
-            return Task.CompletedTask;
+        public async Task RestoreRegistrationsAsync(CancellationToken cancellationToken)
+        {
+            if (this._telephoneStore is null)
+            {
+                return;
+            }
+
+            IReadOnlyList<DeviceRegistrationRecord> registrations = await this._telephoneStore
+                .GetActiveDeviceRegistrationsAsync(DateTimeOffset.Now, cancellationToken);
+            foreach (DeviceRegistrationRecord registration in registrations)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    lock (this._deviceLock)
+                    {
+                        if (!this._connectionStore.Contains(registration.DeviceId))
+                        {
+                            this._connectionStore.Add(
+                                registration.DeviceId,
+                                new DeviceContext(
+                                    this.ServiceProvider.GetRequiredService<SIPTransport>(),
+                                    registration,
+                                    this.Config.AssistantConfigs,
+                                    this.Logger));
+                        }
+                    }
+                }
+                catch (Exception exception) when (exception is FormatException or ArgumentException or InvalidOperationException)
+                {
+                    this.Logger.LogWarning(exception, "Unable to restore SIP registration for device {DeviceId}.", registration.DeviceId);
+                    await this._telephoneStore.RemoveDeviceRegistrationAsync(registration.DeviceId, cancellationToken);
+                }
+            }
         }
 
         public DeviceContext GetOrRegisterSIPDevice(
@@ -87,7 +143,8 @@ namespace Agent.Telephone.Management
                 sipRequest,
                 contact,
                 expiresSeconds,
-                this.Config.AssistantConfigs);
+                this.Config.AssistantConfigs,
+                this.Logger);
             this._connectionStore.Add(deviceContext.DeviceId, deviceContext);
             return deviceContext;
         }

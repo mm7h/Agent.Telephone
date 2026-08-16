@@ -15,10 +15,10 @@ namespace Agent.Telephone.Abstractions
         /// 初始化服务
         /// </summary>
         /// <param name="config">配置信息</param>
-        /// <param name="messageStore">消息存储实现</param>
+        /// <param name="telephoneStore">电话系统持久化存储实现</param>
         /// <returns></returns>
         /// <exception cref="ArgumentNullException"></exception>
-        IServerBuilder Initialize(TelephoneConfig config, IMessageStore messageStore);
+        IServerBuilder Initialize(TelephoneConfig config, ITelephoneStore telephoneStore);
         /// <summary>
         /// 添加自定义验证
         /// </summary>

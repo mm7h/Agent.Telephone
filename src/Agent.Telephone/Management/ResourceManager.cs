@@ -1,5 +1,4 @@
-﻿using Agent.Telephone.Abstractions.Configs;
-using Agent.Telephone.Common.BuildConfigs;
+using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Media;
 using Agent.Telephone.Resources;
@@ -37,7 +36,6 @@ namespace Agent.Telephone.Management
 
         public override bool BuildComponent()
         {
-
             #region FFmpeg
             if (MediaFactory.CheckFFmpegInstalled(out string ffmpegVersion))
             {
@@ -57,10 +55,7 @@ namespace Agent.Telephone.Management
             }
 
             IAudioFileCaching audioFileCaching = this.ServiceProvider.GetRequiredService<IAudioFileCaching>();
-            AudioFileCachingBuildConfig audioFileCachingBuildConfig = new(
-                this.Config.PromptMediaPath,
-                this.Config.PromptMediaConfigs);
-            return audioFileCaching.Load(audioFileCachingBuildConfig);
+            return audioFileCaching.Load();
         }
 
         public override void Dispose()

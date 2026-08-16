@@ -47,8 +47,8 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
             this._audioProcessor = privateProvider.AudioProcessor;
             this._vad = privateProvider.Vad;
-            this._vad.RegisterDevice(this.ActiveCallContext.DeviceId, this);
-            this._audioProcessor.RegisterDevice(this.ActiveCallContext.DeviceId);
+            this._vad.RegisterDevice(this.ActiveCallContext, this);
+            this._audioProcessor.RegisterDevice(this.ActiveCallContext);
 
             this.RegisterCancellationToken(this.ActiveCallContext);
             return true;
@@ -95,7 +95,11 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
                 this.ActiveCallContext.DeviceContext.AudioInPacket.PushAudio(pcmData);
 
-                await this._vad.AnalysisVoiceAsync(this.ActiveCallContext.DeviceId, this.ActiveCallContext.DeviceContext.AudioInPacket.GetAllAudio(), this.HandlerToken);
+                await this._vad.AnalysisVoiceAsync(
+                    this.ActiveCallContext.DeviceId,
+                    pcmData,
+                    this.ActiveCallContext.DeviceContext.AudioInPacket.GetAllAudio(),
+                    this.HandlerToken);
             }
             catch (OperationCanceledException)
             {
@@ -119,8 +123,6 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             {
                 // Audio too short, cannot recognize
                 this.Logger.LogDebug("设备 {deviceId} 的语音太短。", this.ActiveCallContext.DeviceId);
-                
-                // todo
                 return;
             }
 
@@ -152,17 +154,18 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
         public void OnLongTermSilence()
         {
-            // todo: 挂掉电话
+            ActiveCallContext activeCall = this.ActiveCallContext;
+            if (!activeCall.UserAgent.IsCallActive)
+            {
+                return;
+            }
+            this.Logger.LogDebug("设备 {deviceId} 检测到长时间静音，挂断电话。", activeCall.DeviceId);
+            activeCall.MarkEnding();
+            activeCall.UserAgent.Hangup();
         }
 
         public override void Dispose()
         {
-            if (this._vad is not null)
-            {
-                this._vad.UnregisterDevice(this.ActiveCallContext.DeviceId);
-            }
-
-            this.NextWriter?.TryComplete();
             base.Dispose();
         }
 

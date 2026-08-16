@@ -18,15 +18,12 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         private readonly ObjectPool<OutSegment> _segmentPool;
         private readonly ObjectPool<Workflow<OutAudioSegment>> _audioWorkflowPool;
         private readonly ObjectPool<OutAudioSegment> _audioSegmentPool;
-        private readonly IOfflineDialogue _offlineDialogue;
         private readonly SemaphoreSlim _synthesisLock = new(1, 1);
-        private long _activeTurnId;
 
         public Text2AudioHandler(ObjectPool<Workflow<OutSegment>> segmentWorkflowPool,
             ObjectPool<OutSegment> segmentPool,
             ObjectPool<Workflow<OutAudioSegment>> audioWorkflowPool,
             ObjectPool<OutAudioSegment> audioSegmentPool,
-            IOfflineDialogue offlineDialogue,
             TelephoneConfig config,
             ILogger<Text2AudioHandler> logger) : base(config, logger)
         {
@@ -34,7 +31,6 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             this._segmentWorkflowPool = segmentWorkflowPool;
             this._audioWorkflowPool = audioWorkflowPool;
             this._audioSegmentPool = audioSegmentPool;
-            this._offlineDialogue = offlineDialogue;
         }
 
         public override string HandlerName => HandlerNames.Text2AudioHandlerName;
@@ -51,7 +47,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
 
             this._tts = privateProvider.Tts;
-            this._tts.RegisterDevice(this.ActiveCallContext.DeviceId, this);
+            this._tts.RegisterDevice(this.ActiveCallContext, this);
 
             this.RegisterCancellationToken(this.ActiveCallContext, continueAfterCallEnded: true);
             return true;
@@ -74,37 +70,67 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         }
         public async Task HandleAsync(Workflow<OutSegment> workflow)
         {
+            await this.SynthesizeAsync(workflow, trackGeneratedAudio: true, this.HandlerToken);
+        }
+
+        public async Task<bool> SynthesizePromptAsync(
+            string content,
+            string paragraphId,
+            string sentenceId,
+            CancellationToken cancellationToken)
+        {
+            OutSegment segment = this._segmentPool.Get();
+            Workflow<OutSegment> workflow = this._segmentWorkflowPool.Get();
+            segment.Initialize(
+                content,
+                isFirst: true,
+                isLast: true,
+                paragraphId: paragraphId,
+                sentenceId: sentenceId);
+            workflow.Initialize(this.ActiveCallContext, segment);
+
+            try
+            {
+                return await this.SynthesizeAsync(workflow, trackGeneratedAudio: false, cancellationToken);
+            }
+            finally
+            {
+                this._segmentPool.Return(segment);
+                this._segmentWorkflowPool.Return(workflow);
+            }
+        }
+
+        private async Task<bool> SynthesizeAsync(
+            Workflow<OutSegment> workflow,
+            bool trackGeneratedAudio,
+            CancellationToken cancellationToken)
+        {
             if (!this.CheckWorkflowValid(workflow))
             {
-                return;
+                return false;
             }
             if (this._tts is null)
             {
                 this.Logger.LogError("TTS提供程序未为设备配置: {deviceId}。", this.ActiveCallContext.DeviceId);
-                return;
+                return false;
             }
             try
             {
-                this._activeTurnId = workflow.TurnId;
                 if (string.IsNullOrWhiteSpace(workflow.Data.Content))
                 {
                     this.Logger.LogInformation("无需TTS，查询文本为空。");
-                    return;
+                    return false;
                 }
-                this.HandlerToken.ThrowIfCancellationRequested();
-                await this._synthesisLock.WaitAsync(this.HandlerToken);
+                using CancellationTokenSource synthesisCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    this.HandlerToken,
+                    cancellationToken);
+                CancellationToken synthesisToken = synthesisCts.Token;
+                synthesisToken.ThrowIfCancellationRequested();
+                await this._synthesisLock.WaitAsync(synthesisToken);
                 try
                 {
-                    await this._tts.SynthesisAsync(workflow, this.HandlerToken);
-                    if (!string.IsNullOrWhiteSpace(workflow.Data.SentenceId))
-                    {
-                        await this._offlineDialogue.TrackGeneratedAudioAsync(
-                            this.ActiveCallContext,
-                            workflow.TurnId,
-                            workflow.Data.SentenceId,
-                            workflow.Data.IsLastSegment,
-                            this.HandlerToken);
-                    }
+                    await this._tts.SynthesisAsync(workflow, synthesisToken);
+                    return true;
                 }
                 finally
                 {
@@ -114,10 +140,12 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             catch (OperationCanceledException)
             {
                 this.Logger.LogDebug("TTS 合成已取消，设备 {DeviceId}。", this.ActiveCallContext.DeviceId);
+                return false;
             }
             catch (Exception exception)
             {
                 this.Logger.LogError(exception, "处理设备文本转语音时出错: {deviceId}。", this.ActiveCallContext.DeviceId);
+                return false;
             }
         }
         public async void OnBeforeProcessing(string sentence, bool isFirstSegment, bool isLastSegment)
@@ -129,7 +157,20 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 outAudioSegment.Initialize(audioType: AudioType.TTS, content: sentence, isFirstSegment: isFirstSegment, isLastSegment: isLastSegment);
 
                 nextWorkflow.Initialize(this.ActiveCallContext, outAudioSegment);
-                await this.NextWriter.WriteAsync(nextWorkflow, this.HandlerToken);
+                try
+                {
+                    await this.NextWriter.WriteAsync(nextWorkflow, this.HandlerToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    this._audioSegmentPool.Return(outAudioSegment);
+                    this._audioWorkflowPool.Return(nextWorkflow);
+                }
+                catch (ChannelClosedException)
+                {
+                    this._audioSegmentPool.Return(outAudioSegment);
+                    this._audioWorkflowPool.Return(nextWorkflow);
+                }
             }
             this.Logger.LogDebug("设备 {deviceId} TTS 处理句子: {sentence}.", this.ActiveCallContext.DeviceId, sentence);
         }
@@ -183,11 +224,6 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 {
                     this._audioSegmentPool.Return(finalSegment);
                     this._audioWorkflowPool.Return(finalWorkflow);
-                    _ = this._offlineDialogue.MarkTurnPlaybackCompletedAsync(
-                        this.ActiveCallContext,
-                        this._activeTurnId,
-                        fullyPlayed: false,
-                        CancellationToken.None);
                 }
             }
         }
@@ -234,11 +270,6 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
         public override void Dispose()
         {
-            if (this._tts is not null)
-            {
-                this._tts.UnregisterDevice(this.ActiveCallContext.DeviceId);
-            }
-            this.NextWriter?.TryComplete();
             this._synthesisLock.Dispose();
             base.Dispose();
         }

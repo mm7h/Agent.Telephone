@@ -1,19 +1,14 @@
 ﻿using Agent.Telephone.Common.Configs;
 using Agent.Telephone.Common.Contexts;
-using Microsoft.Extensions.AI;
+using Agent.Telephone.Providers.LLM;
 
 namespace Agent.Telephone.Providers
 {
     internal interface ILlm : IDisposable
     {
-        event Action OnBeforeTokenGenerate;
-        event Action<OutSegment> OnTokenGenerating;
-        event Action<IEnumerable<OutSegment>> OnTokenGenerated;
-
-        IReadOnlyList<ChatMessage> GetChatHistory();
         bool Build(LLMBuildConfig settings);
-        void RegisterDevice(string deviceId);
-        void UnregisterDevice(string deviceId);
+        void RegisterDevice(ActiveCallContext activeCall, ILlmEventCallback callback);
+        void UnregisterDevice(ActiveCallContext activeCall);
         Task StartDialogueAsync(string userMessage, CancellationToken token);
     }
 }

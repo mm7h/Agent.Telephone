@@ -4,11 +4,11 @@ using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Common.Enums;
 using Agent.Telephone.Helpers;
+using Agent.Telephone.Media.Abstractions;
 using Agent.Telephone.Protocol.WebSocket;
 using Agent.Telephone.Providers.TTS.Huoshan.Protocols.Enums;
 using Agent.Telephone.Providers.TTS.Huoshan.Protocols.Models;
 using Microsoft.Extensions.Logging;
-using IAudioEditor = Agent.Telephone.Media.Abstractions.IAudioEditor;
 
 namespace Agent.Telephone.Providers.TTS.Huoshan
 {
@@ -205,7 +205,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             return await waitTask;
         }
 
-        protected async Task FinalizeSessionAudioAsync(string sessionId, string deviceId)
+        protected async Task FinalizeSessionAudioAsync(string sessionId)
         {
             List<float>? audioBuffer = null;
             lock (this._audioBufferLock)
@@ -219,7 +219,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
 
             if (audioBuffer is not null && audioBuffer.Any())
             {
-                await this.SaveAudioFileAsync(deviceId, sessionId, audioBuffer.ToArray());
+                await this.SaveAudioFileAsync(this.CurrentCall.DeviceId, this.CurrentCall.CallerNumber, this.CurrentCall.DialedNumber, sessionId, audioBuffer.ToArray()).ConfigureAwait(false);
             }
         }
 
@@ -231,7 +231,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             }
         }
 
-        protected void ClearAllSessionAudioBuffers()
+        protected void ClearAudioBuffer()
         {
             lock (this._audioBufferLock)
             {
@@ -333,14 +333,15 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             {
                 return;
             }
-            this.Logger.LogDebug("设备 {deviceId} 的火山 WebSocket 已连接。", this.DeviceId);
+            this.Logger.LogDebug("设备 {deviceId} 的火山 WebSocket 已连接。", this.CurrentCall?.DeviceId ?? "unknown");
         }
 
         private void WebSocketClient_OnClose(System.Net.WebSockets.WebSocketCloseStatus? status, string? desc)
         {
-            this.Logger.LogDebug("设备 {deviceId} 的火山 WebSocket 已关闭。状态：{status}，描述：{desc}", this.DeviceId, status, desc);
-            this.ClearAllSessionAudioBuffers();
-            this.FailAllWaits(new OperationCanceledException(string.Format("设备 {deviceId} 的火山 WebSocket 已关闭：{Status} {Description}", this.DeviceId, status, desc)));
+            string deviceId = this.CurrentCall?.DeviceId ?? "unknown";
+            this.Logger.LogDebug("设备 {deviceId} 的火山 WebSocket 已关闭。状态：{status}，描述：{desc}", deviceId, status, desc);
+            this.ClearAudioBuffer();
+            this.FailAllWaits(new OperationCanceledException($"设备 {deviceId} 的火山 WebSocket 已关闭：{status} {desc}"));
             if (this.StreamingActive)
             {
                 this.TTSEventCallback?.OnProcessed(string.Empty, false, false, TtsGenerateResult.Failed);
@@ -349,9 +350,10 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
 
         private void WebSocketClient_OnError(System.Net.WebSockets.WebSocketError error, string message)
         {
-            this.Logger.LogError("设备 {deviceId} 的火山 WebSocket 已关闭。状态：{status}，描述：{desc}", this.DeviceId, error, message);
-            this.ClearAllSessionAudioBuffers();
-            this.FailAllWaits(new Exception(string.Format("设备 {deviceId} 的火山 WebSocket 已关闭。状态：{status}，描述：{desc}", this.DeviceId, error, message)));
+            string deviceId = this.CurrentCall?.DeviceId ?? "unknown";
+            this.Logger.LogError("设备 {deviceId} 的火山 WebSocket 已关闭。状态：{status}，描述：{desc}", deviceId, error, message);
+            this.ClearAudioBuffer();
+            this.FailAllWaits(new Exception($"设备 {deviceId} 的火山 WebSocket 已关闭。状态：{error}，描述：{message}"));
             if (this.StreamingActive)
             {
                 this.TTSEventCallback?.OnProcessed(string.Empty, false, false, TtsGenerateResult.Failed);
@@ -420,7 +422,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             {
                 if (this.AudioSavingConfig is not null && this.AudioSavingConfig.SaveFile && !string.IsNullOrWhiteSpace(message.SessionId))
                 {
-                    this.FinalizeSessionAudioAsync(message.SessionId, this.DeviceId);
+                    _ = this.FinalizeSessionAudioAsync(message.SessionId);
                 }
 
                 if (this.StreamingActive && !string.IsNullOrWhiteSpace(message.SessionId))
@@ -494,6 +496,7 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
                 }
             }
         }
+
         #endregion
     }
 }

@@ -20,11 +20,17 @@ namespace Agent.Telephone.Resources
             int packetTimeMs,
             CancellationToken cancellationToken);
 
+        Task<bool> PlayCachedAudioFilesAsync(
+            IReadOnlyList<string> relativeFilePaths,
+            int outputSampleRate,
+            Action<float[]> onAudioData,
+            CancellationToken cancellationToken);
+
         Task<bool> PlayFileAsync(
             string filePath,
-            VoIPMediaSession mediaSession,
-            AudioFormat audioFormat,
+            int outputSampleRate,
             int packetTimeMs,
+            Action<float[]> onAudioData,
             CancellationToken cancellationToken);
     }
 }

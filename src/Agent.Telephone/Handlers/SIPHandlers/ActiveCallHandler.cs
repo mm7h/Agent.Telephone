@@ -8,8 +8,6 @@ namespace Agent.Telephone.Handlers.SIPHandlers
 {
     internal sealed class ActiveCallHandler : BaseHandler
     {
-        private ActiveCallContext? _activeCall;
-
         public ActiveCallHandler(TelephoneConfig config, ILogger<ActiveCallHandler> logger) : base(config, logger) { }
 
         public override string HandlerName => HandlerNames.ActiveCallHandlerName;
@@ -17,7 +15,6 @@ namespace Agent.Telephone.Handlers.SIPHandlers
         public override bool Build()
         {
             ActiveCallContext activeCall = this.ActiveCallContext;
-            this._activeCall = activeCall;
             activeCall.UserAgent.OnCallHungup += this.OnCallHungup;
             activeCall.UserAgent.ServerCallCancelled += this.OnServerCallCancelled;
             activeCall.UserAgent.OnDtmfTone += this.OnDtmfTone;
@@ -26,9 +23,10 @@ namespace Agent.Telephone.Handlers.SIPHandlers
 
         public async Task<bool> AnswerAsync(SIPRequest request)
         {
-            ActiveCallContext? activeCall = this._activeCall;
             IDisposable? lease = null;
-            if (activeCall is not null && activeCall.TryAcquireUse(out lease) && lease is not null)
+            ActiveCallContext activeCall = this.ActiveCallContext;
+
+            if (activeCall.TryAcquireUse(out lease) && lease is not null)
             {
                 using (lease)
                 {
@@ -70,25 +68,22 @@ namespace Agent.Telephone.Handlers.SIPHandlers
 
         private void OnDtmfTone(byte tone, int duration)
         {
-            ActiveCallContext? activeCall = this._activeCall;
-            activeCall?.AIAgentContext.PrivateProvider.DtmfInput?.HandleDtmfTone(activeCall, tone);
+            this.ActiveCallContext.AIAgentContext.PrivateProvider.DtmfInput?.HandleDtmfTone(this.ActiveCallContext, tone);
         }
 
         private void CloseActiveCallSession()
         {
-            if (this._activeCall is not null)
-            {
-                this.ActiveCallContext.DeviceContext.CloseCallSession(this._activeCall);
-            }
+            this.ActiveCallContext.DeviceContext.CloseCallSession(this.ActiveCallContext);
         }
 
         public override void Dispose()
         {
-            if (this._activeCall is not null)
+            ActiveCallContext activeCall = this.ActiveCallContext;
+            if (activeCall is not null)
             {
-                this._activeCall.UserAgent.OnCallHungup -= this.OnCallHungup;
-                this._activeCall.UserAgent.ServerCallCancelled -= this.OnServerCallCancelled;
-                this._activeCall.UserAgent.OnDtmfTone -= this.OnDtmfTone;
+                activeCall.UserAgent.OnCallHungup -= this.OnCallHungup;
+                activeCall.UserAgent.ServerCallCancelled -= this.OnServerCallCancelled;
+                activeCall.UserAgent.OnDtmfTone -= this.OnDtmfTone;
             }
         }
     }

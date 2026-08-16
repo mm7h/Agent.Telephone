@@ -11,6 +11,10 @@ namespace Agent.Telephone.Common.Contexts
 
         private readonly Dictionary<string, FunctionToolRegistration> _functionToolRegistrations;
         private readonly List<PrivateFunctionTool> _privateFunctionTools;
+        private readonly object _lifetimeLock = new();
+        private ActiveCallContext? _activeCall;
+        private IDisposable? _privateFunctionToolLifetime;
+        private bool _disposed;
 
         public PrivateProvider(string deviceId)
         {
@@ -20,6 +24,12 @@ namespace Agent.Telephone.Common.Contexts
             this._privateFunctionTools = [];
         }
 
+        public PrivateProvider(ActiveCallContext activeCall)
+            : this(activeCall.DeviceId)
+        {
+            this._activeCall = activeCall;
+        }
+
         public string DeviceId { get; }
         public IList<AITool> FunctionTools { get; }
         public IAudioProcessor? AudioProcessor { get; private set; }
@@ -27,16 +37,18 @@ namespace Agent.Telephone.Common.Contexts
         public IAsr? Asr { get; private set; }
         public ILlm? Llm { get; private set; }
         public ITts? Tts { get; private set; }
+        public IOfflineDialogue? OfflineDialogue { get; private set; }
         public ICallControl? CallControl { get; private set; }
         public IDtmfInput? DtmfInput { get; private set; }
 
-        public void SetAudioProcessor(IAudioProcessor value) => this.AudioProcessor = value;
-        public void SetVad(IVad value) => this.Vad = value;
-        public void SetAsr(IAsr value) => this.Asr = value;
-        public void SetLlm(ILlm value) => this.Llm = value;
-        public void SetTts(ITts value) => this.Tts = value;
-        public void SetCallControl(ICallControl value) => this.CallControl = value;
-        public void SetDtmfInput(IDtmfInput value) => this.DtmfInput = value;
+        public void SetAudioProcessor(IAudioProcessor value) => this.SetProvider(value, static (instance, provider) => instance.AudioProcessor = provider);
+        public void SetVad(IVad value) => this.SetProvider(value, static (instance, provider) => instance.Vad = provider);
+        public void SetAsr(IAsr value) => this.SetProvider(value, static (instance, provider) => instance.Asr = provider);
+        public void SetLlm(ILlm value) => this.SetProvider(value, static (instance, provider) => instance.Llm = provider);
+        public void SetTts(ITts value) => this.SetProvider(value, static (instance, provider) => instance.Tts = provider);
+        public void SetOfflineDialogue(IOfflineDialogue value) => this.SetProvider(value, static (instance, provider) => instance.OfflineDialogue = provider);
+        public void SetCallControl(ICallControl value) => this.SetProvider(value, static (instance, provider) => instance.CallControl = provider);
+        public void SetDtmfInput(IDtmfInput value) => this.SetProvider(value, static (instance, provider) => instance.DtmfInput = provider);
 
         public DtmfKey GetAvailableDtmfKeys()
         {
@@ -45,28 +57,52 @@ namespace Agent.Telephone.Common.Contexts
                 static (keys, registration) => keys | registration.DtmfKeys);
         }
 
-        public void ClearCallControl(ICallControl value)
-        {
-            if (ReferenceEquals(this.CallControl, value))
-            {
-                this.CallControl = null;
-            }
-        }
         public List<PrivateFunctionTool> PrivateFunctionTools => this._privateFunctionTools;
 
         public void AddFunctionToolRegistration(PrivateFunctionTool privateFunctionTool, FunctionToolRegistration registration)
         {
-            if (!this._privateFunctionTools.Contains(privateFunctionTool))
+            lock (this._lifetimeLock)
             {
-                this._privateFunctionTools.Add(privateFunctionTool);
+                this.ThrowIfDisposed();
+                if (!this._privateFunctionTools.Contains(privateFunctionTool))
+                {
+                    this._privateFunctionTools.Add(privateFunctionTool);
+                }
+                this.AddFunctionToolRegistrationCore(registration);
             }
-            this.AddFunctionToolRegistration(registration);
+        }
+
+        public void SetPrivateFunctionToolLifetime(IDisposable lifetime)
+        {
+            ArgumentNullException.ThrowIfNull(lifetime);
+
+            lock (this._lifetimeLock)
+            {
+                try
+                {
+                    this.ThrowIfDisposed();
+                    if (this._privateFunctionToolLifetime is not null)
+                    {
+                        throw new InvalidOperationException("The private function tool lifetime has already been registered.");
+                    }
+
+                    this._privateFunctionToolLifetime = lifetime;
+                }
+                catch
+                {
+                    lifetime.Dispose();
+                    throw;
+                }
+            }
         }
 
         public void AddFunctionToolRegistration(FunctionToolRegistration registration)
         {
-            this.FunctionTools.Add(registration.Function);
-            this._functionToolRegistrations[registration.Function.Name] = registration;
+            lock (this._lifetimeLock)
+            {
+                this.ThrowIfDisposed();
+                this.AddFunctionToolRegistrationCore(registration);
+            }
         }
 
         public bool TryGetFunctionToolRegistration(string functionName, out FunctionToolRegistration? registration)
@@ -76,28 +112,113 @@ namespace Agent.Telephone.Common.Contexts
 
         public void Dispose()
         {
-            this.Vad?.UnregisterDevice(this.DeviceId);
-            this.Asr?.UnregisterDevice(this.DeviceId);
-            this.Tts?.UnregisterDevice(this.DeviceId);
-            if (this.Vad is { IsSherpaModel: false })
+            ActiveCallContext? activeCall;
+            IDisposable? privateFunctionToolLifetime;
+            IAudioProcessor? audioProcessor;
+            IVad? vad;
+            IAsr? asr;
+            ILlm? llm;
+            ITts? tts;
+            IOfflineDialogue? offlineDialogue;
+            ICallControl? callControl;
+            IDtmfInput? dtmfInput;
+
+            lock (this._lifetimeLock)
             {
-                this.Vad.Dispose();
+                if (this._disposed)
+                {
+                    return;
+                }
+
+                this._disposed = true;
+                activeCall = this._activeCall;
+                this._activeCall = null;
+                privateFunctionToolLifetime = this._privateFunctionToolLifetime;
+                this._privateFunctionToolLifetime = null;
+                audioProcessor = this.AudioProcessor;
+                vad = this.Vad;
+                asr = this.Asr;
+                llm = this.Llm;
+                tts = this.Tts;
+                offlineDialogue = this.OfflineDialogue;
+                callControl = this.CallControl;
+                dtmfInput = this.DtmfInput;
+
+                this.AudioProcessor = null;
+                this.Vad = null;
+                this.Asr = null;
+                this.Llm = null;
+                this.Tts = null;
+                this.OfflineDialogue = null;
+                this.CallControl = null;
+                this.DtmfInput = null;
+                this.FunctionTools.Clear();
+                this._functionToolRegistrations.Clear();
+                this._privateFunctionTools.Clear();
             }
-            if (this.Asr is { IsSherpaModel: false })
+
+            privateFunctionToolLifetime?.Dispose();
+
+            if (activeCall is not null)
             {
-                this.Asr.Dispose();
+                UnregisterProvider(audioProcessor, activeCall);
+                UnregisterProvider(vad, activeCall);
+                UnregisterProvider(asr, activeCall);
+                llm?.UnregisterDevice(activeCall);
+                UnregisterProvider(tts, activeCall);
+                UnregisterProvider(offlineDialogue, activeCall);
+                UnregisterProvider(callControl, activeCall);
+                UnregisterProvider(dtmfInput, activeCall);
             }
-            if (this.Tts is { IsSherpaModel: false })
+
+            if (vad is { IsSherpaModel: false })
             {
-                this.Tts.Dispose();
+                vad.Dispose();
             }
-            this.AudioProcessor?.Dispose();
-            this.Llm?.Dispose();
-            this.CallControl?.Dispose();
-            this.DtmfInput?.Dispose();
-            this.FunctionTools.Clear();
-            this._functionToolRegistrations.Clear();
-            this._privateFunctionTools.Clear();
+            if (asr is { IsSherpaModel: false })
+            {
+                asr.Dispose();
+            }
+            if (tts is { IsSherpaModel: false })
+            {
+                tts.Dispose();
+            }
+            audioProcessor?.Dispose();
+            llm?.Dispose();
+            offlineDialogue?.Dispose();
+            callControl?.Dispose();
+            dtmfInput?.Dispose();
+        }
+
+        private void SetProvider<TProvider>(TProvider provider, Action<PrivateProvider, TProvider> assign)
+            where TProvider : class
+        {
+            ArgumentNullException.ThrowIfNull(provider);
+
+            lock (this._lifetimeLock)
+            {
+                this.ThrowIfDisposed();
+                assign(this, provider);
+            }
+        }
+
+        private void AddFunctionToolRegistrationCore(FunctionToolRegistration registration)
+        {
+            this.FunctionTools.Add(registration.Function);
+            this._functionToolRegistrations[registration.Function.Name] = registration;
+        }
+
+        private void ThrowIfDisposed()
+        {
+            ObjectDisposedException.ThrowIf(this._disposed, this);
+        }
+
+        private static void UnregisterProvider<TSettings>(
+            IProvider<TSettings>? provider,
+            ActiveCallContext activeCall)
+            where TSettings : class
+        {
+            provider?.UnregisterDevice(activeCall);
         }
     }
 }

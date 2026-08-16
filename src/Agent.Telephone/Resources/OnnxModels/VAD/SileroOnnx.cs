@@ -13,15 +13,15 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
     /// The Infer() method is thread-safe when each caller provides their own SileroModelState.
     /// 
     /// Model inputs (v4):
-    /// - input: [batch_size, chunk_samples] - Audio samples (512 for 16kHz, 256 for 8kHz)
+    /// - input: [batch_size, chunk_samples] - 16kHz audio samples (512 samples per frame)
     /// - sr: [1] - Sample rate as int64
-    /// - h: [2, batch_size, 64] - Hidden state (for 16kHz) or [2, batch_size, 128] (for 8kHz)
-    /// - c: [2, batch_size, 64] - Cell state (for 16kHz) or [2, batch_size, 128] (for 8kHz)
+    /// - h: [2, batch_size, 64] - Hidden state
+    /// - c: [2, batch_size, 64] - Cell state
     /// 
     /// Model outputs (v4):
     /// - output: [batch_size, 1] - Speech probability
-    /// - hn: [2, batch_size, 64/128] - New hidden state
-    /// - cn: [2, batch_size, 64/128] - New cell state
+    /// - hn: [2, batch_size, 64] - New hidden state
+    /// - cn: [2, batch_size, 64] - New cell state
     /// </summary>
     internal sealed class SileroOnnx : BaseOnnxModel<SileroOnnx>, IVadOnnxModel
     {
@@ -30,7 +30,9 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
         private InferenceSession? _session;
         private bool _disposed;
 
-        private static readonly int[] s_sUPPORTED_SAMPLE_RATES = [8000, 16000];
+        private const int SupportedSampleRate = 16000;
+        private const int FrameSize = 512;
+        private const int StateSize = 64;
 
         public SileroOnnx(ILogger<SileroOnnx> logger) : base(logger)
         {
@@ -66,7 +68,7 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
         /// Creates a new model state for a client session.
         /// Each client should have its own state instance for lock-free concurrent access.
         /// </summary>
-        /// <param name="sampleRate">Sample rate (8000 or 16000)</param>
+        /// <param name="sampleRate">Sample rate (16000)</param>
         public static SileroModelState CreateModelState(int sampleRate)
         {
             return new SileroModelState(sampleRate);
@@ -77,7 +79,7 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
         /// Multiple callers can use this method concurrently with their own SileroModelState.
         /// </summary>
         /// <param name="audioSamples">Audio samples as float array (normalized to [-1, 1])</param>
-        /// <param name="sampleRate">Sample rate (8000 or 16000)</param>
+        /// <param name="sampleRate">Sample rate (16000)</param>
         /// <param name="modelState">Per-client model state for lock-free concurrent access</param>
         /// <returns>Speech probability (0.0 to 1.0)</returns>
         public float Infer(float[] audioSamples, int sampleRate, SileroModelState modelState)
@@ -94,20 +96,18 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
 
             this.ValidateInput(audioSamples, sampleRate, modelState);
 
-            int expectedSamples = sampleRate == 16000 ? 512 : 256;
-            if (audioSamples.Length != expectedSamples)
+            if (audioSamples.Length != FrameSize)
             {
-                throw new ArgumentException(string.Format("样本数量不匹配。期望 {0} 个样本，实际 {1} 个样本，采样率 {2}。", expectedSamples, audioSamples.Length, sampleRate));
+                throw new ArgumentException(string.Format("样本数量不匹配。期望 {0} 个样本，实际 {1} 个样本，采样率 {2}。", FrameSize, audioSamples.Length, sampleRate));
             }
 
-            int stateSize = sampleRate == 16000 ? 64 : 128;
             const int BatchSize = 1;
 
             // Prepare input tensors
             var inputTensor = new DenseTensor<float>(audioSamples, new int[] { BatchSize, audioSamples.Length });
             var srTensor = new DenseTensor<long>(new long[] { sampleRate }, new int[] { 1 });
-            var hTensor = new DenseTensor<float>(modelState.HiddenState, new int[] { 2, BatchSize, stateSize });
-            var cTensor = new DenseTensor<float>(modelState.CellState, new int[] { 2, BatchSize, stateSize });
+            var hTensor = new DenseTensor<float>(modelState.HiddenState, new int[] { 2, BatchSize, StateSize });
+            var cTensor = new DenseTensor<float>(modelState.CellState, new int[] { 2, BatchSize, StateSize });
 
             var inputs = new List<NamedOnnxValue>
             {
@@ -132,14 +132,14 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
 
                 // Extract and update hidden state
                 var hnTensor = outputs.First(o => o.Name == "hn").AsTensor<float>();
-                float[] newHiddenState = new float[2 * BatchSize * stateSize];
+                float[] newHiddenState = new float[2 * BatchSize * StateSize];
                 for (int i = 0; i < 2; i++)
                 {
                     for (int j = 0; j < BatchSize; j++)
                     {
-                        for (int k = 0; k < stateSize; k++)
+                        for (int k = 0; k < StateSize; k++)
                         {
-                            newHiddenState[i * BatchSize * stateSize + j * stateSize + k] = hnTensor[i, j, k];
+                            newHiddenState[i * BatchSize * StateSize + j * StateSize + k] = hnTensor[i, j, k];
                         }
                     }
                 }
@@ -147,14 +147,14 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
 
                 // Extract and update cell state
                 var cnTensor = outputs.First(o => o.Name == "cn").AsTensor<float>();
-                float[] newCellState = new float[2 * BatchSize * stateSize];
+                float[] newCellState = new float[2 * BatchSize * StateSize];
                 for (int i = 0; i < 2; i++)
                 {
                     for (int j = 0; j < BatchSize; j++)
                     {
-                        for (int k = 0; k < stateSize; k++)
+                        for (int k = 0; k < StateSize; k++)
                         {
-                            newCellState[i * BatchSize * stateSize + j * stateSize + k] = cnTensor[i, j, k];
+                            newCellState[i * BatchSize * StateSize + j * StateSize + k] = cnTensor[i, j, k];
                         }
                     }
                 }
@@ -171,9 +171,9 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD
                 throw new ArgumentException("音频样本为空。");
             }
 
-            if (!s_sUPPORTED_SAMPLE_RATES.Contains(sampleRate))
+            if (sampleRate != SupportedSampleRate)
             {
-                throw new ArgumentException(string.Format("不支持的采样率：{sampleRate}。仅支持 8000 和 16000。", sampleRate));
+                throw new ArgumentException(string.Format("不支持的采样率：{sampleRate}。仅支持 16000。", sampleRate));
             }
 
             if (modelState.LastSampleRate != sampleRate)

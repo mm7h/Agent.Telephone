@@ -48,7 +48,7 @@ namespace Agent.Telephone.Media.Mixers
 
         public void AddData(float[] audioData, string? sentenceId = null)
         {
-            if (this._disposed || this._stopRequested || audioData == null)
+            if (this._disposed || audioData == null)
             {
                 return;
             }
@@ -61,6 +61,17 @@ namespace Agent.Telephone.Media.Mixers
 
             lock (this._syncLock)
             {
+                // TTS 的下一段可能在上一个逻辑段的尾帧排空前到达。保留已缓冲的
+                // 音频并撤销停止标记，避免将下一段静默丢弃。
+                if (this._stopRequested)
+                {
+                    this._stopRequested = false;
+                    this._isLastFrame = false;
+                    this._isComplete = false;
+                    this._streamEnded = false;
+                    this._silentFrameCount = 0;
+                }
+
                 // 如果上一个逻辑流已完成且缓冲区为空，
                 // 则重置状态，使下一次添加成为带有首帧的新分段。
                 if (this._isComplete && this._bufferQueue.IsEmpty)

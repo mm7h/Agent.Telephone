@@ -7,14 +7,12 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD.Models
     internal sealed class SileroModelState
     {
         /// <summary>
-        /// Hidden state tensor for LSTM (2 layers x 1 batch x 64 units for 16kHz, or 128 for 8kHz).
-        /// Shape: [2, 1, 64] for 16kHz or [2, 1, 128] for 8kHz
+        /// Hidden state tensor for LSTM. Shape: [2, 1, 64] for 16kHz.
         /// </summary>
         public float[] HiddenState { get; private set; }
 
         /// <summary>
-        /// Cell state tensor for LSTM.
-        /// Shape: [2, 1, 64] for 16kHz or [2, 1, 128] for 8kHz
+        /// Cell state tensor for LSTM. Shape: [2, 1, 64] for 16kHz.
         /// </summary>
         public float[] CellState { get; private set; }
 
@@ -26,14 +24,17 @@ namespace Agent.Telephone.Resources.OnnxModels.VAD.Models
         private readonly int _stateSize;
 
         /// <summary>
-        /// Creates a new model state for the specified sample rate.
+        /// Creates a new model state for 16kHz input.
         /// </summary>
-        /// <param name="sampleRate">Sample rate (8000 or 16000)</param>
+        /// <param name="sampleRate">Sample rate (16000)</param>
         public SileroModelState(int sampleRate)
         {
-            // Silero VAD v4: state size depends on sample rate
-            // 16kHz: 64 units, 8kHz: 128 units (2 layers x 1 batch x units)
-            this._stateSize = sampleRate == 16000 ? 64 : 128;
+            if (sampleRate != 16000)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sampleRate), sampleRate, "SileroNative 仅支持 16000Hz 输入。");
+            }
+
+            this._stateSize = 64;
             this.HiddenState = new float[2 * 1 * this._stateSize];
             this.CellState = new float[2 * 1 * this._stateSize];
             this.LastSampleRate = sampleRate;

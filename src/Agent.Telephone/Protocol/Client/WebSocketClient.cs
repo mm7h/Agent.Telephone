@@ -128,6 +128,10 @@ namespace Agent.Telephone.Protocol.WebSocket
                     await this._socket.StopOrFail(webSocketCloseStatus, statusDescription);
                 }
             }
+            // 服务端可能在完成协议关闭后先断开；此时本地关闭握手失败不表示 TTS 失败。
+            catch (Exception) when (!this.IsConnected)
+            {
+            }
             catch (Exception)
             {
                 this.OnError?.Invoke(WebSocketError.ConnectionClosedPrematurely, "无法优雅地关闭 WebSocket 连接。");

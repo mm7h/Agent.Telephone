@@ -1,20 +1,16 @@
+﻿using Agent.Telephone.Abstractions.Configs;
+using Agent.Telephone.Common.Configs;
+using Agent.Telephone.Common.Constants;
+using Agent.Telephone.Common.Contexts;
+using Agent.Telephone.Common.Exceptions;
+using Agent.Telephone.Helpers;
+using Agent.Telephone.Providers.LLM.Agents;
+using Agent.Telephone.Providers.LLM.Contexts;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Agent.Telephone.Common.Configs;
-using Agent.Telephone.Common.Constants;
-using Agent.Telephone.Common.Contexts;
-using Agent.Telephone.Common.Exceptions;
-using Agent.Telephone.Providers.LLM.Agents;
-using Agent.Telephone.Providers.LLM.Contexts;
-using Agent.Telephone.Abstractions.Configs;
 
 namespace Agent.Telephone.Providers.LLM
 {
@@ -25,8 +21,10 @@ namespace Agent.Telephone.Providers.LLM
         private readonly ObjectPool<OutSegment> _outSegmentPool;
         private readonly Dictionary<string, IAgent> _subAgents = new Dictionary<string, IAgent>();
         private Workflow? _dialogueWorkflow;
+        private ILlmEventCallback? _eventCallback;
         private int _seqParagraphId = 0;
         private int _seqSentenceId = 0;
+        private int _responseTimeoutSeconds = 30;
 
         public GenericOpenAI(IServiceProvider serviceProvider,
             ObjectPool<OutSegment> outSegmentPool,
@@ -40,16 +38,15 @@ namespace Agent.Telephone.Providers.LLM
         public override string ModelName => nameof(GenericOpenAI);
         public override string ProviderType => "llm";
 
-        public event Action? OnBeforeTokenGenerate;
-        public event Action<OutSegment>? OnTokenGenerating;
-        public event Action<IEnumerable<OutSegment>>? OnTokenGenerated;
-
         public override bool Build(LLMBuildConfig modelSetting)
         {
             try
             {
                 this._subAgents.Clear();
                 this._dialogueWorkflow = null;
+                this._responseTimeoutSeconds = Math.Max(
+                    1,
+                    modelSetting.AgentSettings[SubAgentNames.ChatAgent].Config.GetConfigValueOrDefault("ResponseTimeoutSeconds", 30));
 
                 IAgent inputAgent = this._serviceProvider.GetRequiredKeyedService<IAgent>(SubAgentNames.InputAgent);
                 IAgent intentDetectionAgent = this._serviceProvider.GetRequiredKeyedService<IAgent>(SubAgentNames.IntentDetectionAgent);
@@ -130,18 +127,39 @@ namespace Agent.Telephone.Providers.LLM
                 .Build();
         }
 
-        public override void RegisterDevice(string deviceId)
+        public void RegisterDevice(ActiveCallContext activeCall, ILlmEventCallback callback)
+        {
+            ArgumentNullException.ThrowIfNull(callback);
+            this._eventCallback = callback;
+
+            foreach (var agent in this._subAgents.Values)
+            {
+                agent.RegisterDevice(activeCall.DeviceId);
+            }
+            if (this._subAgents.TryGetValue(SubAgentNames.ChatAgent, out IAgent? chatSubAgent) &&
+                chatSubAgent is ChatAgent chatAgent)
+            {
+                chatAgent.SetChatHistory(activeCall.AIAgentContext.ChatHistory);
+            }
+            base.RegisterDevice(activeCall);
+        }
+
+        public override void UnregisterDevice(ActiveCallContext activeCall)
         {
             foreach (var agent in this._subAgents.Values)
             {
-                agent.RegisterDevice(deviceId);
+                agent.UnregisterDevice(activeCall.DeviceId);
             }
-            base.RegisterDevice(deviceId);
+            if (ReferenceEquals(this.CurrentCall, activeCall))
+            {
+                this._eventCallback = null;
+            }
+            base.UnregisterDevice(activeCall);
         }
 
         public async Task StartDialogueAsync(string userMessage, CancellationToken token)
         {
-            if (!this.CheckDeviceRegistered(this.DeviceId))
+            if (!this.CheckDeviceRegistered(this.CurrentCall.DeviceId))
             {
                 throw new SessionNotInitializedException();
             }
@@ -155,22 +173,50 @@ namespace Agent.Telephone.Providers.LLM
                 throw new InvalidOperationException("Dialogue workflow is not initialized.");
             }
 
-            this.OnBeforeTokenGenerate?.Invoke();
-            await this.RunAndEmitWorkflowStreamingAsync(this._dialogueWorkflow, userMessage, token);
-        }
+            ILlmEventCallback eventCallback = this._eventCallback
+                ?? throw new InvalidOperationException("The LLM event callback has not been registered.");
 
-        public IReadOnlyList<ChatMessage> GetChatHistory()
-        {
-            return this._subAgents.TryGetValue(SubAgentNames.ChatAgent, out IAgent? agent)
-                && agent is ChatAgent chatAgent
-                    ? chatAgent.ChatHistory
-                    : [];
+            List<ChatMessage> chatHistory = this.CurrentCall.AIAgentContext.ChatHistory;
+            int chatHistoryCount = chatHistory.Count;
+            using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(this._responseTimeoutSeconds));
+            try
+            {
+                string assistantMessage = await this.RunAndEmitWorkflowStreamingAsync(
+                    this._dialogueWorkflow,
+                    userMessage,
+                    eventCallback,
+                    timeoutCts.Token);
+                AppendMissingChatHistory(chatHistory, chatHistoryCount, userMessage, assistantMessage);
+                await eventCallback.OnCompletedAsync(CancellationToken.None);
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested && timeoutCts.IsCancellationRequested)
+            {
+                await eventCallback.OnFailedAsync(
+                    new TimeoutException($"LLM response exceeded {this._responseTimeoutSeconds} seconds."),
+                    CancellationToken.None);
+                this.Logger.LogWarning(
+                    "LLM 对话在 {timeoutSeconds} 秒内未完成，设备 {deviceId}。",
+                    this._responseTimeoutSeconds,
+                    this.CurrentCall.DeviceId);
+                throw new TimeoutException($"LLM 对话超过 {this._responseTimeoutSeconds} 秒未完成。");
+            }
+            catch (OperationCanceledException)
+            {
+                await eventCallback.OnCancelledAsync(CancellationToken.None);
+                throw;
+            }
+            catch (Exception exception)
+            {
+                await eventCallback.OnFailedAsync(exception, CancellationToken.None);
+                throw;
+            }
         }
 
         protected override string GenerateId()
         {
             int sequence = Interlocked.Increment(ref this._seqParagraphId);
-            return $"{this.DeviceId}_{sequence}";
+            return $"{this.CurrentCall.DeviceId}_{sequence}";
         }
 
         private string GenerateSentenceId(string paragraphId)
@@ -178,9 +224,13 @@ namespace Agent.Telephone.Providers.LLM
             return $"{paragraphId}_{Interlocked.Increment(ref this._seqSentenceId)}";
         }
 
-        private async Task RunAndEmitWorkflowStreamingAsync(Workflow dialogueWorkflow, string userMessage, CancellationToken token)
+        private async Task<string> RunAndEmitWorkflowStreamingAsync(
+            Workflow dialogueWorkflow,
+            string userMessage,
+            ILlmEventCallback eventCallback,
+            CancellationToken token)
         {
-            await using StreamingRun run = await InProcessExecution.Concurrent.RunStreamingAsync(dialogueWorkflow, userMessage, this.DeviceId, token);
+            await using StreamingRun run = await InProcessExecution.Concurrent.RunStreamingAsync(dialogueWorkflow, userMessage, this.CurrentCall.DeviceId, token);
 
             List<OutSegment> allSegments = new List<OutSegment>();
             string paragraphId = this.GenerateId();
@@ -197,13 +247,15 @@ namespace Agent.Telephone.Providers.LLM
                     {
                         case WorkflowOutputEvent workflowOutputEvent when workflowOutputEvent.Data is WorkflowOutputs output:
 
-                            //todo: 检查段落处理
-
                             this.Logger.LogDebug("Content {content}.", output.ResponseText);
                             if (pendingSegment is not null)
                             {
                                 allSegments.Add(pendingSegment);
-                                this.OnTokenGenerating?.Invoke(pendingSegment);
+                                if (segmentCount == 1)
+                                {
+                                    await eventCallback.OnBeforeFirstSegmentAsync(pendingSegment, token);
+                                }
+                                await eventCallback.OnSegmentAsync(pendingSegment, token);
                             }
 
                             OutSegment segment = this._outSegmentPool.Get();
@@ -224,10 +276,15 @@ namespace Agent.Telephone.Providers.LLM
                 {
                     pendingSegment.IsLastSegment = true;
                     allSegments.Add(pendingSegment);
-                    this.OnTokenGenerating?.Invoke(pendingSegment);
+                    if (segmentCount == 1)
+                    {
+                        await eventCallback.OnBeforeFirstSegmentAsync(pendingSegment, token);
+                    }
+                    await eventCallback.OnSegmentAsync(pendingSegment, token);
                 }
 
-                this.OnTokenGenerated?.Invoke(allSegments);
+                return string.Concat(allSegments.Select(segment => segment.Content));
+
             }
             catch (OperationCanceledException)
             {
@@ -237,7 +294,6 @@ namespace Agent.Telephone.Providers.LLM
                     allSegments.Add(pendingSegment);
                 }
                 this.Logger.LogDebug("Dialogue workflow cancelled after {count} segments.", allSegments.Count);
-                this.OnTokenGenerated?.Invoke(allSegments);
                 throw;
             }
             catch (Exception ex)
@@ -247,8 +303,35 @@ namespace Agent.Telephone.Providers.LLM
                     allSegments.Add(pendingSegment);
                 }
                 this.Logger.LogError(ex, "Unexpected error in {providerType} dialogue workflow.", this.ProviderType);
-                this.OnTokenGenerated?.Invoke(allSegments);
                 throw;
+            }
+            finally
+            {
+                foreach (OutSegment segment in allSegments.Distinct())
+                {
+                    this._outSegmentPool.Return(segment);
+                }
+            }
+        }
+
+        private static void AppendMissingChatHistory(
+            List<ChatMessage> chatHistory,
+            int previousCount,
+            string userMessage,
+            string assistantMessage)
+        {
+            IReadOnlyList<ChatMessage> currentTurnMessages = chatHistory.Skip(previousCount).ToArray();
+            if (!currentTurnMessages.Any(message =>
+                message.Role == ChatRole.User &&
+                string.Equals(message.Text, userMessage, StringComparison.Ordinal)))
+            {
+                chatHistory.Add(new ChatMessage(ChatRole.User, userMessage));
+            }
+
+            if (!string.IsNullOrWhiteSpace(assistantMessage) &&
+                !currentTurnMessages.Any(message => message.Role == ChatRole.Assistant))
+            {
+                chatHistory.Add(new ChatMessage(ChatRole.Assistant, assistantMessage));
             }
         }
 

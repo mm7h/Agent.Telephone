@@ -1,5 +1,7 @@
 using Agent.Telephone.Abstractions.Configs;
+using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Helpers;
+using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Providers.VAD.Contexts;
 using Agent.Telephone.Resources.OnnxModels;
 using Agent.Telephone.Resources.OnnxModels.VAD;
@@ -17,19 +19,17 @@ namespace Agent.Telephone.Providers.VAD.Native
         private readonly IServiceProvider _serviceProvider;
 
         private IVadOnnxModel? _vadOnnxModel;
-        private int _sampleRate = 16000;
-        private int _closeConnectionNoVoiceTime = 120;
+        private int _closeConnectionNoVoiceTime = 120_000;
 
         private float _silenceThresholdSecond;
         private float _threshold;
         private float _thresholdLow;
 
         private const int FRAME_WINDOW_THRESHOLD = 5;
-        private const int SAMPLING_RATE_8K = 8000;
-        private const int SAMPLING_RATE_16K = 16000;
 
         private SileroModelState? _sileroModelState;
         private VadSessionState? _vadSessionState;
+        private float[] _pendingAudio = [];
 
         private IVadEventCallback? _vadEventCallback;
 
@@ -47,24 +47,16 @@ namespace Agent.Telephone.Providers.VAD.Native
         {
             try
             {
-                this._sampleRate = modelSetting.Config.GetConfigValueOrDefault("SampleRate", SAMPLING_RATE_16K);
-
-                if (this._sampleRate != SAMPLING_RATE_8K && this._sampleRate != SAMPLING_RATE_16K)
-                {
-                    this.Logger.LogError("不支持的采样率：{sampleRate}。仅支持 8000 和 16000。", this._sampleRate);
-                    return false;
-                }
-
                 this._silenceThresholdSecond = modelSetting.Config.GetConfigValueOrDefault("SilenceThresholdSecond", 0.7f);
                 this._threshold = modelSetting.Config.GetConfigValueOrDefault("Threshold", 0.5f);
                 this._thresholdLow = modelSetting.Config.GetConfigValueOrDefault("ThresholdLow", 0.2f);
-                this._closeConnectionNoVoiceTime = modelSetting.Config.GetConfigValueOrDefault("CloseConnectionNoVoiceTime", 120);
+                this._closeConnectionNoVoiceTime = modelSetting.Config.GetConfigValueOrDefault("CloseConnectionNoVoiceTime", 120_000);
 
-                this.FrameSize = this._sampleRate == SAMPLING_RATE_16K ? 512 : 256;
+                this.FrameSize = 512;
 
                 this._vadOnnxModel = this._serviceProvider.GetRequiredService<IVadOnnxModel>();
 
-                this._sileroModelState = SileroOnnx.CreateModelState(this._sampleRate);
+                this._sileroModelState = SileroOnnx.CreateModelState(AudioProcessSettings.OutputToModelSampleRate);
 
                 this.Logger.LogInformation("已构建 {providerType} 模型：{modelName}", this.ProviderType, this.ModelName);
 
@@ -76,21 +68,26 @@ namespace Agent.Telephone.Providers.VAD.Native
                 return false;
             }
         }
-        public void RegisterDevice(string deviceId, IVadEventCallback callback)
+        public void RegisterDevice(ActiveCallContext activeCall, IVadEventCallback callback)
         {
             this._vadEventCallback = callback;
             this._vadSessionState = new VadSessionState();
 
-            this.RegisterDevice(deviceId);
+            this.RegisterDevice(activeCall);
         }
 
         public void ResetSessionState(string deviceId)
         {
             this._sileroModelState?.Reset();
             this._vadSessionState?.Reset();
+            this._pendingAudio = [];
         }
 
-        public Task AnalysisVoiceAsync(string deviceId, float[] audioData, CancellationToken token)
+        public Task AnalysisVoiceAsync(
+            string deviceId,
+            float[] newAudioData,
+            float[] bufferedAudioData,
+            CancellationToken token)
         {
             if (this._vadOnnxModel is null)
             {
@@ -104,9 +101,11 @@ namespace Agent.Telephone.Providers.VAD.Native
 
             try
             {
-                int analyzedIndex = this._vadSessionState.AnalyzedIndex;
+                float[] pendingAndNewAudio = this.CombinePendingAudio(newAudioData);
+                int analyzedIndex = 0;
+                bool analyzedFrame = false;
 
-                while (audioData.GetSlidingFrame(this.FrameSize, ref analyzedIndex, out float[] chunk))
+                while (pendingAndNewAudio.GetSlidingFrame(this.FrameSize, ref analyzedIndex, out float[] chunk))
                 {
                     token.ThrowIfCancellationRequested();
 
@@ -115,7 +114,9 @@ namespace Agent.Telephone.Providers.VAD.Native
                         continue;
                     }
 
-                    float speechProb = this._vadOnnxModel.Infer(chunk, this._sampleRate, this._sileroModelState);
+                    analyzedFrame = true;
+
+                    float speechProb = this._vadOnnxModel.Infer(chunk, AudioProcessSettings.OutputToModelSampleRate, this._sileroModelState);
 
                     bool isSpeechDetected;
                     if (speechProb >= this._threshold)
@@ -133,32 +134,41 @@ namespace Agent.Telephone.Providers.VAD.Native
 
                     this._vadSessionState.LastIsVoice = isSpeechDetected;
 
-                    this._vadSessionState.AddToVoiceWindow(isSpeechDetected);
-
-                    bool clientHaveVoice = this._vadSessionState.CountVoiceInWindow() >= FRAME_WINDOW_THRESHOLD;
-
-                    if (this._vadSessionState.HaveVoice && !clientHaveVoice)
+                    if (!this._vadSessionState.HaveVoice)
                     {
-                        long stopDuration = DateTimeOffset.Now.ToUnixTimeMilliseconds() - this._vadSessionState.HaveVoiceLatestTime;
-                        if (stopDuration >= this._silenceThresholdSecond * 1000)
+                        this._vadSessionState.AddToVoiceWindow(isSpeechDetected);
+                        if (this._vadSessionState.CountVoiceInWindow() >= FRAME_WINDOW_THRESHOLD)
                         {
-                            this.Logger.LogDebug("设备 {deviceId} 的语音已停止，静默持续时间：{stopDuration}ms", deviceId, stopDuration);
+                            this._vadSessionState.HaveVoice = true;
+                            this._vadSessionState.HaveVoiceLatestTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+                            this._vadSessionState.SilenceFrameCount = 0;
+                        }
+                    }
+                    else if (isSpeechDetected)
+                    {
+                        this._vadSessionState.HaveVoiceLatestTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+                        this._vadSessionState.SilenceFrameCount = 0;
+                    }
+                    else
+                    {
+                        this._vadSessionState.SilenceFrameCount++;
+                        int silenceDurationMs = this._vadSessionState.SilenceFrameCount * this.FrameSize * 1000 / AudioProcessSettings.OutputToModelSampleRate;
+                        if (silenceDurationMs >= this._silenceThresholdSecond * 1000)
+                        {
+                            this.Logger.LogDebug("设备 {deviceId} 的语音已停止，静默持续时间：{silenceDuration}ms", deviceId, silenceDurationMs);
                             this._vadSessionState.VoiceStop = true;
 
-                            this._vadEventCallback?.OnVoiceDetected(audioData);
+                            this._vadEventCallback?.OnVoiceDetected(bufferedAudioData);
                             this._vadSessionState.Reset();
+                            this._pendingAudio = [];
                             return Task.CompletedTask;
                         }
                     }
-
-                    if (clientHaveVoice && !this._vadSessionState.HaveVoice)
-                    {
-                        this._vadSessionState.HaveVoice = true;
-                        this._vadSessionState.HaveVoiceLatestTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-                    }
                 }
 
-                if (!this._vadSessionState.HaveVoice && analyzedIndex > this.FrameSize * 50)
+                this._pendingAudio = pendingAndNewAudio[analyzedIndex..];
+
+                if (!this._vadSessionState.HaveVoice && analyzedFrame)
                 {
                     this._vadEventCallback?.OnVoiceSilence();
                 }
@@ -171,6 +181,7 @@ namespace Agent.Telephone.Providers.VAD.Native
             {
                 this._sileroModelState.Reset();
                 this._vadSessionState.Reset();
+                this._pendingAudio = [];
                 this.Logger.LogWarning("用户取消了 {providerType} 任务。", this.ProviderType);
                 throw;
             }
@@ -179,10 +190,19 @@ namespace Agent.Telephone.Providers.VAD.Native
                 this.Logger.LogError(ex, "设备 {deviceId} 的 {providerType} 发生意外错误", this.ProviderType, deviceId);
                 return Task.CompletedTask;
             }
-            finally
+        }
+
+        private float[] CombinePendingAudio(float[] audioData)
+        {
+            if (this._pendingAudio.Length == 0)
             {
-                this._vadSessionState.AnalyzedIndex = 0;
+                return audioData;
             }
+
+            float[] combined = new float[this._pendingAudio.Length + audioData.Length];
+            Array.Copy(this._pendingAudio, combined, this._pendingAudio.Length);
+            Array.Copy(audioData, 0, combined, this._pendingAudio.Length, audioData.Length);
+            return combined;
         }
 
         private void CheckLongTermSilence(string deviceId, VadSessionState vadState)
@@ -194,7 +214,7 @@ namespace Agent.Telephone.Providers.VAD.Native
             }
 
             long silenceDuration = DateTimeOffset.Now.ToUnixTimeMilliseconds() - vadState.HaveVoiceLatestTime;
-            long longTermSilenceThresholdMs = this._closeConnectionNoVoiceTime * 1000;
+            long longTermSilenceThresholdMs = this._closeConnectionNoVoiceTime;
 
             if (silenceDuration >= longTermSilenceThresholdMs)
             {
@@ -207,6 +227,7 @@ namespace Agent.Telephone.Providers.VAD.Native
         {
             this._sileroModelState?.Reset();
             this._vadSessionState?.Reset();
+            this._pendingAudio = [];
         }
     }
 }

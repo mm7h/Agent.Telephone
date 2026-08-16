@@ -30,8 +30,18 @@ try
 
     if (config is not null)
     {
+        string configDirectory = Path.Combine(Environment.CurrentDirectory, "configs");
+        foreach (AssistantConfig assistant in config.AssistantConfigs)
+        {
+            string promptFilePath = Path.Combine(configDirectory, assistant.Prompt);
+            if (File.Exists(promptFilePath))
+            {
+                assistant.Prompt = File.ReadAllText(promptFilePath);
+            }
+        }
+
         SqliteMessageStore messageStore = new(new());
-        await messageStore.CleanupAsync(DateTimeOffset.UtcNow);
+        await messageStore.CleanupConversationMessagesAsync(DateTimeOffset.UtcNow);
 
         // 开始初始化服务
         serverHost = serverBuilder.Initialize(config, messageStore)

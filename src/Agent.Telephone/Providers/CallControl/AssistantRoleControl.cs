@@ -47,7 +47,7 @@ namespace Agent.Telephone.Providers.CallControl
             return true;
         }
 
-        public async Task<AssistantSwitchResult> SwitchAssistantAsync(
+        public Task<AssistantSwitchResult> SwitchAssistantAsync(
             ActiveCallContext call,
             string targetAssistantNumber,
             CancellationToken cancellationToken = default)
@@ -56,7 +56,7 @@ namespace Agent.Telephone.Providers.CallControl
                 this.ValidateAssistantTarget(call, targetAssistantNumber);
             if (!validationSwitchResult.Succeeded)
             {
-                return validationSwitchResult;
+                return Task.FromResult(validationSwitchResult);
             }
 
             if (!call.UserAgent.IsCallActive)
@@ -64,10 +64,18 @@ namespace Agent.Telephone.Providers.CallControl
                 this.Logger.LogWarning(
                     "当前通话已经结束，无法切换到目标 Agent，呼叫的号码为：{targetAssistantNumber}",
                     targetAssistantNumber);
-                return new AssistantSwitchResult(
+                return Task.FromResult(new AssistantSwitchResult(
                     AssistantSwitchStatus.CallEnded,
                     targetAssistantNumber.Trim(),
-                    "当前通话已经结束。");
+                    "当前通话已经结束。"));
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromResult(new AssistantSwitchResult(
+                    AssistantSwitchStatus.Failed,
+                    targetAssistantNumber.Trim(),
+                    "角色切换请求已取消。"));
             }
 
             if (!call.TryBeginAssistantSwitch())
@@ -75,20 +83,49 @@ namespace Agent.Telephone.Providers.CallControl
                 this.Logger.LogWarning(
                     "当前通话正在切换 Agent，无法切换到目标 Agent，呼叫的号码为：{targetAssistantNumber}",
                     targetAssistantNumber);
-                return new AssistantSwitchResult(
+                return Task.FromResult(new AssistantSwitchResult(
                     AssistantSwitchStatus.Failed,
                     targetAssistantNumber,
-                    "当前通话正在切换 Agent。");
+                    "当前通话正在切换 Agent。"));
             }
 
-            bool switchResult = await this.SwitchAssistantCoreAsync(
-                call.DeviceContext,
-                targetAssistantNumber,
-                cancellationToken);
+            if (!call.TryAcquireUse(out IDisposable? lease) || lease is null)
+            {
+                call.CompleteAssistantSwitch();
+                return Task.FromResult(new AssistantSwitchResult(
+                    AssistantSwitchStatus.CallEnded,
+                    targetAssistantNumber,
+                    "当前通话已经结束。"));
+            }
 
-            return new AssistantSwitchResult(
-                switchResult ? AssistantSwitchStatus.Accepted : AssistantSwitchStatus.Failed,
-                targetAssistantNumber);
+            _ = this.SwitchAssistantInBackgroundAsync(call, targetAssistantNumber, lease);
+            return Task.FromResult(new AssistantSwitchResult(
+                AssistantSwitchStatus.Accepted,
+                targetAssistantNumber));
+        }
+
+        private async Task SwitchAssistantInBackgroundAsync(
+            ActiveCallContext activeCall,
+            string targetAssistantNumber,
+            IDisposable lease)
+        {
+            try
+            {
+                await this.SwitchAssistantCoreAsync(activeCall, targetAssistantNumber);
+            }
+            catch (Exception exception)
+            {
+                this.Logger.LogError(
+                    exception,
+                    "在后台切换通话 {CallId} 到 Agent {TargetAssistantNumber} 时发生异常。",
+                    activeCall.CallId,
+                    targetAssistantNumber);
+                activeCall.CompleteAssistantSwitch();
+            }
+            finally
+            {
+                lease.Dispose();
+            }
         }
 
         /// <summary>
@@ -138,16 +175,17 @@ namespace Agent.Telephone.Providers.CallControl
         }
 
         private async Task<bool> SwitchAssistantCoreAsync(
-            DeviceContext deviceContext,
-            string targetAssistantNumber,
-            CancellationToken cancellationToken = default)
+            ActiveCallContext currentActiveCall,
+            string targetAssistantNumber)
         {
-            ActiveCallContext currentActiveCall = deviceContext.ActiveCall!;
+            DeviceContext deviceContext = currentActiveCall.DeviceContext;
+            if (!ReferenceEquals(deviceContext.ActiveCall, currentActiveCall))
+            {
+                return false;
+            }
 
             using CancellationTokenSource ringbackCts =
-                CancellationTokenSource.CreateLinkedTokenSource(
-                    currentActiveCall.CallToken,
-                    cancellationToken);
+                CancellationTokenSource.CreateLinkedTokenSource(currentActiveCall.CallToken);
 
             Task<bool> ringbackTask = this._audioPromptPlayer
                 .PlaySIPCodeAudioLoopAsync(

@@ -1,8 +1,8 @@
 ﻿using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.BuildConfigs;
+using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Helpers;
-using Agent.Telephone.Resources;
-using IAudioEditor = Agent.Telephone.Media.Abstractions.IAudioEditor;
+using Agent.Telephone.Media.Abstractions;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 
@@ -30,10 +30,16 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
         protected ITtsEventCallback? TTSEventCallback { get; set; }
         public int GetTtsSampleRate() => SAMPLE_RATE;
 
-        public void RegisterDevice(string deviceId, ITtsEventCallback callback)
+        public void RegisterDevice(ActiveCallContext activeCall, ITtsEventCallback callback)
         {
             this.TTSEventCallback = callback;
-            this.RegisterDevice(deviceId);
+            this.RegisterDevice(activeCall);
+        }
+
+        public override void UnregisterDevice(ActiveCallContext activeCall)
+        {
+            this.TTSEventCallback = null;
+            base.UnregisterDevice(activeCall);
         }
 
         public string? GetSavedAudioFilePath(string sentenceId) =>
@@ -48,20 +54,39 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
             }
         }
 
-        protected async Task<bool> SaveAudioFileAsync(string deviceId, string fileName, float[] audioData)
+        protected async Task<bool> SaveAudioFileAsync(
+            string deviceId,
+            string? callerNumber,
+            string? dialedNumber,
+            string index,
+            float[] audioData)
         {
             if (this.AudioSavingConfig is not null && this.AudioSavingConfig.SaveFile)
             {
-                string sentenceId = fileName;
-                string savedFileName = $"{this.ProviderType}_{sentenceId}.{this.AudioSavingConfig.Format}";
+                string savedFileName = FileNameHelper.CreateAudioFileName(
+                    this.ProviderType,
+                    callerNumber,
+                    dialedNumber,
+                    FileNameHelper.GetIndex(index, deviceId),
+                    this.AudioSavingConfig.Format);
                 string savingPath = Path.Combine(this.AudioSavingConfig.SavePath, savedFileName);
                 try
                 {
-                    bool saved = await this._audioEditor.SaveAudioFileAsync(savingPath, audioData, this.GetTtsSampleRate(), 1, 128000);
+                    int outputSampleRate = this.GetNegotiatedAudioSavingSampleRate();
+                    float[] savedAudio = ResampleForAudioSaving(
+                        audioData,
+                        this.GetTtsSampleRate(),
+                        outputSampleRate);
+                    bool saved = await this._audioEditor.SaveAudioFileAsync(
+                        savingPath,
+                        savedAudio,
+                        outputSampleRate,
+                        channels: 1,
+                        bitRate: 128000);
 
                     if (saved)
                     {
-                        this._savedAudioPaths[sentenceId] = savingPath;
+                        this._savedAudioPaths[index] = savingPath;
                         this.Logger.LogInformation("已将 TTS 音频文件保存到 {audioPath}，设备 {deviceId}。", savedFileName, deviceId);
                     }
                     else
