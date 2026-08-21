@@ -2,6 +2,7 @@
 
 using System.Text;
 using Agent.Telephone.Abstractions.Persistence;
+using Agent.Telephone.Providers;
 
 namespace Agent.Telephone.Common.Contexts
 {
@@ -9,6 +10,7 @@ namespace Agent.Telephone.Common.Contexts
     {
         private readonly ActiveCallContext _activeCallContext;
         private readonly List<OfflineDialogueTurn> _completedOnlineTurns = [];
+        private Func<string, string, string, CancellationToken, Task<bool>>? _synthesizePrompt;
 
         public AIAgentContext(ActiveCallContext activeCallContext)
         {
@@ -25,6 +27,24 @@ namespace Agent.Telephone.Common.Contexts
         public List<ChatMessage> ChatHistory { get; }
         public string? CurrentDialingNumber { get; }
         public bool HasCompletedOnlineTurns => this._completedOnlineTurns.Count > 0;
+
+        public void SetPromptSynthesizer(Func<string, string, string, CancellationToken, Task<bool>> synthesizePrompt)
+        {
+            this._synthesizePrompt = synthesizePrompt;
+        }
+
+        public bool TryStartInitialGreeting()
+        {
+            IAudioProcessor? audioProcessor = this.PrivateProvider.AudioProcessor;
+            if (audioProcessor is null || this._synthesizePrompt is null)
+            {
+                return false;
+            }
+
+            this._activeCallContext.PauseUserAudioInput();
+            audioProcessor.StartInitialGreeting(this._activeCallContext, this._synthesizePrompt);
+            return true;
+        }
 
         public void LoadPersistedChatHistory(IReadOnlyList<ConversationMessage> messages)
         {
@@ -64,12 +84,18 @@ namespace Agent.Telephone.Common.Contexts
             this._completedOnlineTurns.Remove(turn);
         }
 
-        public void Dispose()
+        public async Task DisposeAsync()
         {
-            this.HandlerPipeline.Dispose();
+            await this.HandlerPipeline.DisposeAsync();
+            this._synthesizePrompt = null;
             this.PrivateProvider.Dispose();
             this.ChatHistory.Clear();
             this._completedOnlineTurns.Clear();
+        }
+
+        public void Dispose()
+        {
+            this.DisposeAsync().GetAwaiter().GetResult();
         }
     }
 }

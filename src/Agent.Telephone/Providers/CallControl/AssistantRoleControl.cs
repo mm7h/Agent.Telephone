@@ -201,7 +201,7 @@ namespace Agent.Telephone.Providers.CallControl
             {
                 currentActiveCall.CallToken.ThrowIfCancellationRequested();
 
-                if (!currentActiveCall.TryReplaceAssistantSession(targetAssistantNumber))
+                if (!await currentActiveCall.TryReplaceAssistantSessionAsync(targetAssistantNumber))
                 {
                     this.Logger.LogWarning(
                         "无法在保持 SIP 通话的情况下切换到 Agent {TargetAssistantNumber}。",
@@ -233,7 +233,10 @@ namespace Agent.Telephone.Providers.CallControl
                     ;
                 ringbackStopped = true;
                 currentActiveCall.ResumeAgentMedia();
-                deviceContext.MarkCallConnected(currentActiveCall);
+                if (!currentActiveCall.AIAgentContext.TryStartInitialGreeting())
+                {
+                    deviceContext.MarkCallConnected(currentActiveCall);
+                }
                 this.Logger.LogInformation(
                     "设备 {DeviceId} 已在当前 SIP 通话中切换到 Agent {TargetAssistantNumber}。",
                     currentActiveCall.DeviceId,

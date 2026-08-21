@@ -207,7 +207,7 @@ namespace Agent.Telephone.Common.Contexts
         /// <summary>
         /// Replaces the Agent resources while preserving the connected SIP call.
         /// </summary>
-        public bool TryReplaceAssistantSession(string targetAssistantNumber)
+        public async Task<bool> TryReplaceAssistantSessionAsync(string targetAssistantNumber)
         {
             if (string.IsNullOrWhiteSpace(targetAssistantNumber))
             {
@@ -235,7 +235,7 @@ namespace Agent.Telephone.Common.Contexts
                 completedOnlineTurns = currentAgent.GetCompletedOnlineTurns();
             }
 
-            currentAgent.Dispose();
+            await currentAgent.DisposeAsync();
 
             lock (this._agentSessionLock)
             {
@@ -293,7 +293,7 @@ namespace Agent.Telephone.Common.Contexts
         [MemberNotNull(nameof(this.UserAgent))]
         private void CreateSIPUserAgent(SIPTransport sipTransport)
         {
-            this.UserAgent = new SIPUserAgent(sipTransport, SIPEndPoint.Empty, true);
+            this.UserAgent = new SIPUserAgent(sipTransport, null, true);
         }
 
         [MemberNotNull(nameof(this.VoIPRTP))]

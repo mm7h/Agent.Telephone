@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using SIPSorcery.Media;
 using SIPSorcery.SIP;
 using SIPSorceryMedia.Abstractions;
+using System.Diagnostics;
 using ISIPSorceryAudioCodec = SIPSorcery.Media.AudioEncoder;
 
 namespace Agent.Telephone.Resources
@@ -208,6 +209,8 @@ namespace Agent.Telephone.Resources
             int bytesPerPacket = samplesPerPacket * sizeof(short);
             try
             {
+                Stopwatch playbackClock = Stopwatch.StartNew();
+                TimeSpan scheduledPlayback = TimeSpan.Zero;
                 for (int offset = 0; offset < audioBytes.Length; offset += bytesPerPacket)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -217,9 +220,12 @@ namespace Agent.Telephone.Resources
                     short[] resampled = PcmResampler.Resample(source, CachedSampleRate, audioFormat.ClockRate);
                     byte[] encoded = this._audioCodec.EncodeAudio(resampled, audioFormat);
                     mediaSession.SendAudio((uint)resampled.Length, encoded);
-                    await Task.Delay(
-                        TimeSpan.FromSeconds((double)resampled.Length / audioFormat.ClockRate),
-                        cancellationToken);
+                    scheduledPlayback += TimeSpan.FromSeconds((double)resampled.Length / audioFormat.ClockRate);
+                    TimeSpan remainingDelay = scheduledPlayback - playbackClock.Elapsed;
+                    if (remainingDelay > TimeSpan.Zero)
+                    {
+                        await Task.Delay(remainingDelay, cancellationToken);
+                    }
                 }
 
                 return true;

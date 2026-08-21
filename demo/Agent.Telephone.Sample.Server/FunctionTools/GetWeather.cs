@@ -33,8 +33,18 @@ namespace Agent.Telephone.Sample.Server.FunctionTools
         [Description("查询指定城市的天气。调用前先告知用户：确认查询请按1，取消请按2，重新播报菜单请按星号键，结束本次操作请按井号键。")]
         [ToolBehavior(ToolAction.DirectResponse,
             DtmfKeys = DtmfKey.One | DtmfKey.Two | DtmfKey.Star | DtmfKey.Pound)]
-        public FunctionReturn<string> GetWeatherInfo(string city, DtmfInputResult dtmfInput)
+        public FunctionReturn<string> GetWeatherInfo([Description("要查询天气的城市名称")] string? city, DtmfInputResult dtmfInput)
         {
+            this.Logger.LogInformation("尝试查询城市 {City} 的天气，DTMF 输入结果：{DtmfInput}", city, dtmfInput);
+            if (string.IsNullOrWhiteSpace(city))
+            {
+                return new FunctionReturn<string>
+                {
+                    Next = ToolAction.Silent,
+                    Result = "城市名称不能为空，请重新输入。",
+                    Response = "城市名称不能为空，请重新输入。",
+                };
+            }
             if (dtmfInput.SelectedKey != DtmfKey.One)
             {
                 string response = dtmfInput.Status switch
@@ -52,8 +62,6 @@ namespace Agent.Telephone.Sample.Server.FunctionTools
                 };
             }
 
-            // Here you would implement the logic to get weather information for the specified city.
-            // For demonstration purposes, we'll return a mock response.
             string weatherInfo = $"The current weather in {city} is sunny with a temperature of 25°C.";
             this.Logger.LogInformation("Retrieved weather information for {City}: {WeatherInfo}", city, weatherInfo);
             return new FunctionReturn<string>

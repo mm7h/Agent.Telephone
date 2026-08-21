@@ -12,7 +12,7 @@
             this.Intent = string.Empty;
             this.LLM = string.Empty;
             this.TTS = string.Empty;
-            this.Memory = string.Empty;
+            this.TTSSettings = [];
             this.AllowedTools = [];
         }
         public string DialingNumber { get; set; }
@@ -23,7 +23,7 @@
         public string Intent { get; set; }
         public string LLM { get; set; }
         public string TTS { get; set; }
-        public string Memory { get; set; }
+        public List<Dictionary<string, string>> TTSSettings { get; set; }
         public List<string> AllowedTools { get; set; }
     }
 }

@@ -32,6 +32,10 @@ public sealed class AudioReceivedHandlerTests
         VoIPMediaSession clientMediaSession = this.CreateMediaSession();
         var callConnected = new TaskCompletionSource<ActiveCallContext>(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        var clientHungup = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        Action<SIPDialogue> onClientHungup = _ => clientHungup.TrySetResult(true);
+        clientUserAgent.OnCallHungup += onClientHungup;
         serverTransport.SIPTransportRequestReceived += OnRequest;
         try
         {
@@ -65,6 +69,7 @@ public sealed class AudioReceivedHandlerTests
             handler.OnLongTermSilence();
 
             await serverHungup.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await clientHungup.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.False(activeCall.UserAgent.IsCallActive);
             Assert.Null(device.ActiveCall);
             Assert.Equal(CallState.Idle, device.CallState);
@@ -75,6 +80,7 @@ public sealed class AudioReceivedHandlerTests
         finally
         {
             serverTransport.SIPTransportRequestReceived -= OnRequest;
+            clientUserAgent.OnCallHungup -= onClientHungup;
             if (device.ActiveCall is ActiveCallContext activeCall)
             {
                 device.CloseCallSession(activeCall);

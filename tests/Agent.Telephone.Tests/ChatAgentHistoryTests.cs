@@ -49,6 +49,8 @@ public sealed class ChatAgentHistoryTests
         Assert.Equal(ChatToolMode.Auto, chatClient.LastOptions!.ToolMode);
         Assert.NotEmpty(chatClient.LastOptions.Tools!);
         Assert.Null(chatClient.LastOptions.ResponseFormat);
+        Assert.Equal(ReasoningEffort.None, chatClient.LastOptions.Reasoning!.Effort);
+        Assert.Equal(ReasoningOutput.None, chatClient.LastOptions.Reasoning.Output);
     }
 
     [Fact]

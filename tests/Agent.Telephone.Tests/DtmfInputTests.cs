@@ -321,6 +321,10 @@ public sealed class DtmfInputTests
             string targetAssistantNumber,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
+        public void HangupCurrentCall()
+        {
+        }
+
         public Task<DtmfInputResult> RequestDtmfInputAsync(
             DtmfKey keys,
             CancellationToken cancellationToken = default)

@@ -227,7 +227,9 @@ namespace Agent.Telephone.Management
 
                 #region TTS Build
                 pendingTts = this.ServiceProvider.GetRequiredKeyedService<ITts>(ConvertToKebabCase(activeCall.AssistantConfig.TTS));
-                if (!pendingTts.IsSherpaModel && !pendingTts.Build(this.GetConfiguredSetting("TTS", activeCall.AssistantConfig.TTS, this.Config.ModelConfig)))
+                ModelSetting ttsModelSetting = this.GetConfiguredSetting("TTS", activeCall.AssistantConfig.TTS, this.Config.ModelConfig);
+                this.RandomSelectTTSSpeaker(ttsModelSetting, activeCall.AssistantConfig);
+                if (!pendingTts.IsSherpaModel && !pendingTts.Build(ttsModelSetting))
                 {
                     this.Logger.LogError("无法构建 {modelName} 提供程序。", pendingTts.ModelName);
                     return false;
@@ -323,6 +325,22 @@ namespace Agent.Telephone.Management
 
             return modelSetting;
         }
+
+        internal void RandomSelectTTSSpeaker(ModelSetting existingModelSetting, AssistantConfig assistantConfig)
+        {
+            if (assistantConfig.TTSSettings.Count == 0)
+            {
+                return;
+            }
+
+            Dictionary<string, string> selectedSettings = assistantConfig.TTSSettings[
+                Random.Shared.Next(assistantConfig.TTSSettings.Count)];
+            foreach (KeyValuePair<string, string> setting in selectedSettings)
+            {
+                existingModelSetting.Config[setting.Key] = setting.Value;
+            }
+        }
+
         #region Register providers
 
         #region AudioProcessor

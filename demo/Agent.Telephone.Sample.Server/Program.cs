@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Agent.Telephone;
 using Agent.Telephone.Abstractions;
 using Agent.Telephone.Abstractions.Configs;
+using Agent.Telephone.Sample.Server;
 using Agent.Telephone.Sample.Server.FunctionTools;
 using Agent.Telephone.Sample.Server.MessageStore;
 using Microsoft.Extensions.Hosting;
@@ -15,7 +16,7 @@ IHost? serverHost = null;
 IServerBuilder serverBuilder = EngineFactory.CreateAgentTelephoneBuilder();
 try
 {
-    Console.WriteLine("Hello, Agent Telephone!");
+    Console.WriteLine(StartupMessage.Message);
 
     string configJson = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "configs", "config.json"));
 
@@ -49,6 +50,7 @@ try
             .WithFunctionTools<GetTime>()
             .WithPrivateFunctionTools<GetWeather>()
             .WithPrivateFunctionTools<AssistantSwitch>()
+            .WithPrivateFunctionTools<HangupCall>()
             // 多媒体文件格式支持
             .WithMedia(
                 useFFmpegAudioMixer: true,

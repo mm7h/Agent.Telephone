@@ -1,4 +1,4 @@
-using Agent.Telephone.Common.Configs;
+﻿using Agent.Telephone.Common.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Common.Exceptions;
@@ -54,7 +54,7 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
     """;
 
         private ChatClientAgent? _intentClientAgent;
-        private PrivateProvider? _sessionPrivateProvider;
+        private bool _hasTools = false;
 
         public IntentDetectionAgent(IServiceProvider serviceProvider, ILogger<IntentDetectionAgent> logger)
             : base(SubAgentNames.IntentDetectionAgent, serviceProvider, logger)
@@ -72,6 +72,8 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
                 if (string.Compare(ACCEPTED_INTENT_MODEL, intentType, StringComparison.OrdinalIgnoreCase) != 0)
                 {
                     // 非 IntentLlm 模式，跳过初始化（不会被工作流调用）
+                    this.Logger.LogDebug("非 IntentLlm 模式，跳过意图识别 Agent 初始化。");
+                    this._intentClientAgent = null;
                     return true;
                 }
 
@@ -82,20 +84,37 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
                     return false;
                 }
 
-                IChatClient chatClient = this.ServiceProvider.GetRequiredKeyedService<IChatClient>($"LLM_{selectedLLMModel}");
-                this._sessionPrivateProvider = buildConfig.SessionPrivateProvider;
+                IList<AITool> tools = buildConfig.SessionPrivateProvider.FunctionTools ?? [];
+                this._hasTools = tools.Count > 0;
+                if (!this._hasTools)
+                {
+                    this.Logger.LogWarning("IntentDetectionAgent: 没有可用函数工具，意图检测将无法进行。");
+                    return true;
+                }
+
+                this.Logger.LogInformation("IntentDetectionAgent: 已加载 {ToolCount} 个函数工具。", tools.Count);
+
+                string instructions = this.BuildIntentDetectionPrompt(this.BuildToolDescriptions(tools));
                 ChatClientAgentOptions options = new ChatClientAgentOptions
                 {
                     Name = SubAgentNames.IntentDetectionAgent,
                     Description = $"the agent of {SubAgentNames.IntentDetectionAgent}",
                     ChatOptions = new ChatOptions
                     {
+                        Instructions = instructions,
                         Temperature = 0.1f,
                         MaxOutputTokens = 200,
-                        ResponseFormat = ChatResponseFormat.ForJsonSchema<IntentDetectionResult>()
+                        ResponseFormat = ChatResponseFormat.ForJsonSchema<IntentDetectionResult>(),
+                        Reasoning = new ReasoningOptions
+                        {
+                            Effort = ReasoningEffort.None,
+                            Output = ReasoningOutput.None
+                        }
                     }
                 };
 
+
+                IChatClient chatClient = this.ServiceProvider.GetRequiredKeyedService<IChatClient>($"LLM_{selectedLLMModel}");
                 this._intentClientAgent = new ChatClientAgent(
                     chatClient: chatClient,
                     options: options,
@@ -127,6 +146,13 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
                 throw new SessionNotInitializedException();
             }
 
+            if (!this._hasTools)
+            {
+                this.Logger.LogWarning("IntentDetectionAgent: 没有可用函数工具，意图检测将无法进行。");
+                await context.SendMessageAsync(this.CreateEmptyDetectionResult(preInput.UserMessage), token);
+                return;
+            }
+
             // 未初始化（非 IntentLlm 模式），输出无意图结果
             if (this._intentClientAgent is null)
             {
@@ -134,30 +160,12 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
                 return;
             }
 
-            IList<AITool> tools = this._sessionPrivateProvider?.FunctionTools ?? [];
-            if (tools.Count == 0)
-            {
-                await context.SendMessageAsync(this.CreateEmptyDetectionResult(preInput.UserMessage), token);
-                return;
-            }
-
-            string instructions = this.BuildIntentDetectionPrompt(this.BuildToolDescriptions(tools));
-            ChatClientAgentRunOptions runOptions = new ChatClientAgentRunOptions(new ChatOptions
-            {
-                Instructions = instructions,
-                Reasoning = new ReasoningOptions
-                {
-                    Effort = ReasoningEffort.None,
-                    Output = ReasoningOutput.None
-                }
-            });
             AgentResponse<IntentDetectionResult> response = await this._intentClientAgent.RunAsync<IntentDetectionResult>(
                 preInput.UserMessage,
                 serializerOptions: JsonHelper.OPTIONS,
-                options: runOptions,
                 cancellationToken: token);
 
-            if (!TryGetIntentDetectionResult(response, out IntentDetectionResult? detectionResult))
+            if (!this.TryGetIntentDetectionResult(response, out IntentDetectionResult? detectionResult))
             {
                 this.Logger.LogWarning("IntentDetectionAgent: LLM 未返回可反序列化的 JSON，回退为无意图结果。");
                 await context.SendMessageAsync(this.CreateEmptyDetectionResult(preInput.UserMessage), token);
@@ -177,23 +185,23 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
             }
         }
 
-        internal static bool TryGetIntentDetectionResult(
-            AgentResponse<IntentDetectionResult> response,
-            out IntentDetectionResult? detectionResult)
+        internal bool TryGetIntentDetectionResult(AgentResponse<IntentDetectionResult> response, out IntentDetectionResult? detectionResult)
         {
             try
             {
                 detectionResult = response.Result;
                 return true;
             }
-            catch (InvalidOperationException exception) when (exception.Message == "The response did not contain JSON to be deserialized.")
+            catch (InvalidOperationException exception)
             {
                 detectionResult = null;
+                this.Logger.LogError(exception, "IntentDetectionAgent: LLM 返回的响应中不包含可反序列化的 JSON。");
                 return false;
             }
             catch (System.Text.Json.JsonException)
             {
                 detectionResult = null;
+                this.Logger.LogError("IntentDetectionAgent: LLM 返回的响应中包含无效的 JSON。");
                 return false;
             }
         }
@@ -232,7 +240,7 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
                     }
                 }
                 else
-                { 
+                {
                     sb.AppendLine("参数: 不需要参数");
                 }
 

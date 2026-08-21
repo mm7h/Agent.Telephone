@@ -32,6 +32,11 @@ namespace Agent.Telephone.Abstractions.FunctionTools
         Task<AssistantSwitchResult> SwitchAssistantAsync(string targetAssistantNumber, CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// 挂断当前通话。
+        /// </summary>
+        void HangupCurrentCall();
+
+        /// <summary>
         /// 为当前通话启动一次单键 DTMF 选择窗口。
         /// 该异步调用会等待用户按下指定按键之一、等待超时或被取消；它不会阻塞线程。
         /// 可使用 <see cref="DtmfKey.Zero"/> 至 <see cref="DtmfKey.Nine"/>、

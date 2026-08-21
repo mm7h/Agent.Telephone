@@ -138,6 +138,7 @@ namespace Agent.Telephone.Management
                     completeWriters,
                     handlerTasks,
                     this.Logger);
+                activeCallContext.AIAgentContext.SetPromptSynthesizer(text2Audio.SynthesizePromptAsync);
                 pipelineInitialized = true;
             }
             catch (Exception exception)

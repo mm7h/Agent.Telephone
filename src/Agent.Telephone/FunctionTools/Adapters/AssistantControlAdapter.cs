@@ -26,7 +26,12 @@ namespace Agent.Telephone.FunctionTools.Adapters
 
         public bool IsCallActive => this._activeCall.UserAgent.IsCallActive;
 
-        /// <inheritdoc />
+        /// <summary>
+        /// 切换assistant角色
+        /// </summary>
+        /// <param name="targetAssistantNumber">目标assistant的号码</param>
+        /// <param name="cancellationToken"></param>
+        /// <returns>切换结果</returns>
         public Task<AssistantSwitchResult> SwitchAssistantAsync(
             string targetAssistantNumber,
             CancellationToken cancellationToken = default)
@@ -38,6 +43,20 @@ namespace Agent.Telephone.FunctionTools.Adapters
                     targetAssistantNumber,
                     "通话控制功能尚未就绪。"))
                 : callControl.SwitchAssistantAsync(this._activeCall, targetAssistantNumber, cancellationToken);
+        }
+
+        /// <summary>
+        /// 挂断当前通话
+        /// </summary>
+        public void HangupCurrentCall()
+        {
+            if (!this._activeCall.UserAgent.IsCallActive)
+            {
+                return;
+            }
+
+            this._activeCall.MarkEnding();
+            this._activeCall.UserAgent.Hangup();
         }
 
         public Task<DtmfInputResult> RequestDtmfInputAsync(

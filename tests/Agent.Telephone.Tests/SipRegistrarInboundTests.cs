@@ -184,7 +184,7 @@ public sealed class SipRegistrarInboundTests
     }
 
     [Fact]
-    public void AssistantSwitchReplacesOnlyTheAgentSession()
+    public async Task AssistantSwitchReplacesOnlyTheAgentSession()
     {
         using SIPTransport transport = new();
         SIPRequest register = CreateRegisterRequest("sip:1001@192.0.2.10:5060", 300, 300);
@@ -218,7 +218,7 @@ public sealed class SipRegistrarInboundTests
         Assert.False(activeCall.TryBeginAssistantSwitch());
         Assert.True(activeCall.IsAgentSwitching);
         Assert.True(activeCall.IsAgentMediaPaused);
-        Assert.True(activeCall.TryReplaceAssistantSession(TARGET_ASSISTANT_NUMBER));
+        Assert.True(await activeCall.TryReplaceAssistantSessionAsync(TARGET_ASSISTANT_NUMBER));
 
         Assert.False(callOwnedResource.IsDisposed);
         Assert.NotSame(originalAgent, activeCall.AIAgentContext);

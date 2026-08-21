@@ -11,6 +11,7 @@ namespace Agent.Telephone.Common.Contexts
         private IReadOnlyList<Action>? _completeWriters;
         private IReadOnlyList<Task>? _handlerTasks;
         private ILogger? _logger;
+        private Task? _disposeTask;
         private bool _disposed;
 
         public void InitHandlerPipeline(
@@ -39,7 +40,7 @@ namespace Agent.Telephone.Common.Contexts
             }
         }
 
-        public void Dispose()
+        public Task DisposeAsync()
         {
             IReadOnlyList<Action>? completeWriters;
             IReadOnlyList<Task>? handlerTasks;
@@ -47,9 +48,9 @@ namespace Agent.Telephone.Common.Contexts
             ILogger? logger;
             lock (this._lifetimeLock)
             {
-                if (this._disposed)
+                if (this._disposeTask is not null)
                 {
-                    return;
+                    return this._disposeTask;
                 }
 
                 this._disposed = true;
@@ -61,8 +62,22 @@ namespace Agent.Telephone.Common.Contexts
                 this._handlerTasks = null;
                 this._handlers = null;
                 this._logger = null;
+                this._disposeTask = this.DisposeAsync(completeWriters, handlerTasks, handlers, logger);
+                return this._disposeTask;
             }
+        }
 
+        public void Dispose()
+        {
+            this.DisposeAsync().GetAwaiter().GetResult();
+        }
+
+        private async Task DisposeAsync(
+            IReadOnlyList<Action>? completeWriters,
+            IReadOnlyList<Task>? handlerTasks,
+            IReadOnlyList<IHandler>? handlers,
+            ILogger? logger)
+        {
             if (completeWriters is null)
             {
                 return;
@@ -77,7 +92,7 @@ namespace Agent.Telephone.Common.Contexts
             {
                 try
                 {
-                    Task.WhenAll(handlerTasks).GetAwaiter().GetResult();
+                    await Task.WhenAll(handlerTasks);
                 }
                 catch (Exception exception)
                 {

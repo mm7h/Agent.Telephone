@@ -29,7 +29,6 @@ namespace Agent.Telephone.Providers.LLM.Agents
         private ChatClientAgent? _chatClientAgent;
 
         private AgentSession? _agentSession;
-        private PrivateProvider? _sessionPrivateProvider;
         private bool _allowFunctionCall;
 
         public ChatAgent(IServiceProvider serviceProvider, ILogger<ChatAgent> logger) : base(SubAgentNames.ChatAgent, serviceProvider, logger)
@@ -57,20 +56,29 @@ namespace Agent.Telephone.Providers.LLM.Agents
                 string? summaryMemory = agentBuildConfig.AgentSetting.Config.GetValueOrDefault("SummaryMemory");
                 string intentType = agentBuildConfig.AgentSetting.Config.GetConfigValueOrDefault("IntentType", "None");
                 this._allowFunctionCall = string.Compare(FUNCTION_CALL_INTENT_TYPE, intentType, StringComparison.OrdinalIgnoreCase) == 0;
-                
-                this._sessionPrivateProvider = agentBuildConfig.SessionPrivateProvider;
 
                 string instructions = this.BuildInstructions(summaryMemory);
-                IChatClient chatClient = this.ServiceProvider.GetRequiredKeyedService<IChatClient>($"LLM_{agentBuildConfig.AgentSetting.ModelName}");
-
 
                 ChatOptions chatOptions = new ChatOptions
                 {
                     Instructions = instructions,
                     Temperature = 0.5f,
                     MaxOutputTokens = 40,
+                    Reasoning = new ReasoningOptions
+                    {
+                        Effort = ReasoningEffort.None,
+                        Output = ReasoningOutput.None
+                    }
                 };
-                if (!this._allowFunctionCall)
+
+                if (this._allowFunctionCall && agentBuildConfig.SessionPrivateProvider.FunctionTools.Count > 0)
+                {
+                    chatOptions.ToolMode = ChatToolMode.Auto;
+                    chatOptions.Tools = agentBuildConfig.SessionPrivateProvider.FunctionTools;
+
+                    this.Logger.LogDebug("在 ChatAgent 中可用的 tool 数量：{count}", agentBuildConfig.SessionPrivateProvider.FunctionTools.Count);
+                }
+                else
                 {
                     chatOptions.ResponseFormat = ChatResponseFormat.Text;
                 }
@@ -81,6 +89,8 @@ namespace Agent.Telephone.Providers.LLM.Agents
                     Description = $"the agent of {SubAgentNames.ChatAgent}",
                     ChatOptions = chatOptions
                 };
+
+                IChatClient chatClient = this.ServiceProvider.GetRequiredKeyedService<IChatClient>($"LLM_{agentBuildConfig.AgentSetting.ModelName}");
 
                 this._chatClientAgent = new ChatClientAgent(
                     chatClient: chatClient,
@@ -127,7 +137,7 @@ namespace Agent.Telephone.Providers.LLM.Agents
             .SendsMessage<string>();
         }
 
-        
+
         [MessageHandler]
         public async ValueTask GenerateChatResponseAsync(WorkflowPreInputs preInput, IWorkflowContext workflowContext, CancellationToken token)
         {
@@ -180,19 +190,7 @@ namespace Agent.Telephone.Providers.LLM.Agents
             StringBuilder allResponse = new StringBuilder();
             StringBuilder segmentResponse = new StringBuilder();
 
-            ChatClientAgentRunOptions runOptions = new ChatClientAgentRunOptions(new ChatOptions
-            {
-                Reasoning = new ReasoningOptions
-                {
-                    Effort = ReasoningEffort.None,
-                    Output = ReasoningOutput.None
-                },
-                ToolMode = this._allowFunctionCall ? ChatToolMode.Auto : ChatToolMode.None,
-                Tools = (this._allowFunctionCall && this._sessionPrivateProvider?.FunctionTools.Count > 0)
-                    ? this._sessionPrivateProvider.FunctionTools
-                    : null
-            });
-            await foreach (AgentResponseUpdate update in this._chatClientAgent.RunStreamingAsync(userMessage, this._agentSession, runOptions, token))
+            await foreach (AgentResponseUpdate update in this._chatClientAgent.RunStreamingAsync(userMessage, this._agentSession, cancellationToken: token))
             {
                 string content = update.Text ?? string.Empty;
                 string text = MarkdownCleaner.CleanMarkdown(Regex.Unescape(content));

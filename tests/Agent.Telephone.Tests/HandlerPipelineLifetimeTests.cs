@@ -35,6 +35,28 @@ public sealed class HandlerPipelineLifetimeTests
         Assert.Equal(1, handler.DisposeCount);
     }
 
+    [Fact]
+    public async Task DisposeAsync_YieldsUntilTheCurrentHandlerTaskCompletesAsync()
+    {
+        var handler = new TrackingHandler();
+        var handlerCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pipeline = new HandlerPipeline();
+        pipeline.InitHandlerPipeline(
+            [handler],
+            [],
+            [handlerCompletion.Task],
+            NullLogger.Instance);
+
+        Task disposal = pipeline.DisposeAsync();
+
+        Assert.False(disposal.IsCompleted);
+        handler.ConsumerCompleted = true;
+        handlerCompletion.SetResult();
+        await disposal;
+
+        Assert.Equal(1, handler.DisposeCount);
+    }
+
     private sealed class TrackingHandler : IHandler
     {
         public string HandlerName => nameof(TrackingHandler);

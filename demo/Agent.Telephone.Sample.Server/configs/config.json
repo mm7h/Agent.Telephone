@@ -30,12 +30,28 @@
       "VAD": "SileroNative",
       "ASR": "SenseVoice",
       "Intent": "FunctionCall",
-      "LLM": "Qwen",
+      "LLM": "Deepseek",
       "TTS": "HuoshanBidirection",
-      "Memory": "FlashMemory",
+      "TTSSettings": [
+        // 可以设置多种音色
+        // 这里面的配置会覆盖ModelConfig中TTS的任意同键名的配置项
+        {
+          "Speaker": "zh_female_cancan_mars_bigtts"
+        },
+        {
+          "Speaker": "zh_male_beijingxiaoye_moon_bigtts"
+        },
+        {
+          "Speaker": "zh_female_wenrouxiaoya_moon_bigtts"
+        },
+        {
+          "Speaker": "zh_female_daimengchuanmei_moon_bigtts"
+        }
+      ],
       "AllowedTools": [
         // 允许使用的工具列表，工具名称必须与ToolConfig中定义的名称一致
-        "SwitchAssistantAsync"
+        "SwitchAssistantAsync",
+        "HangupCurrentCall"
       ]
     },
     {
@@ -45,11 +61,19 @@
       "VAD": "SileroNative",
       "ASR": "SenseVoice",
       "Intent": "FunctionCall",
-      "LLM": "Qwen",
+      "LLM": "Deepseek",
       "TTS": "HuoshanBidirection",
-      "Memory": "FlashMemory",
+      "TTSSettings": [
+        {
+          "Speaker": "zh_female_wanwanxiaohe_moon_bigtts"
+        },
+        {
+          "Speaker": "zh_female_wanqudashu_moon_bigtts"
+        }
+      ],
       "AllowedTools": [
-        "GetWeatherInfo"
+        "GetWeatherInfo",
+        "HangupCurrentCall"
       ]
     },
     {
@@ -59,10 +83,16 @@
       "VAD": "SileroNative",
       "ASR": "SenseVoice",
       "Intent": "IntentLlm", // 如果要使用按键回馈来触发自定义function tool，则必须使用`FunctionCall`类型
-      "LLM": "Qwen",
+      "LLM": "Deepseek",
       "TTS": "HuoshanBidirection",
-      "Memory": "FlashMemory",
-      "AllowedTools": []
+      "TTSSettings": [
+        {
+          "Speaker": "zh_female_daimengchuanmei_moon_bigtts"
+        }
+      ],
+      "AllowedTools": [
+        "HangupCurrentCall"
+      ]
     }
   ],
   "ModelConfig": {
@@ -131,7 +161,7 @@
         "Qwen": {
           "BaseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
           "ApiKey": "to your llm api key",
-          "ModelName": "qwen3.7-max"
+          "ModelName": "qwen3.7-plus"
         }
       },
       "TTS": {
@@ -147,7 +177,6 @@
           "AppId": "to your api id",
           "AccessToken": "to your access token",
           "ResourceId": "volc.service_type.10029",
-          "Speaker": "zh_female_cancan_mars_bigtts",
           "SpeechRate": 0,
           "LoudnessRate": 0,
           "FileSavingOption": {
