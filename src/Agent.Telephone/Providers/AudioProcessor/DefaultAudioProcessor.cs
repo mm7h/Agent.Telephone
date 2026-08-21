@@ -18,7 +18,6 @@ namespace Agent.Telephone.Providers.AudioProcessor
         private readonly ISIPSorceryAudioCodec _audioCodec;
         private readonly IAudioMixer _audioMixer;
         private readonly IAudioSubtitleRegister _audioSubtitleRegister;
-        private readonly TelephoneConfig _config;
         private readonly IAudioPromptPlayer _audioPromptPlayer;
         private int _mixerSampleRate;
 
@@ -28,7 +27,6 @@ namespace Agent.Telephone.Providers.AudioProcessor
             ISIPSorceryAudioCodec audioCodec,
             IAudioMixer audioMixer,
             IAudioSubtitleRegister audioSubtitleRegister,
-            TelephoneConfig config,
             IAudioPromptPlayer audioPromptPlayer,
             ILogger<DefaultAudioProcessor> logger)
             : base(logger)
@@ -36,7 +34,6 @@ namespace Agent.Telephone.Providers.AudioProcessor
             this._audioCodec = audioCodec;
             this._audioMixer = audioMixer;
             this._audioSubtitleRegister = audioSubtitleRegister;
-            this._config = config;
             this._audioPromptPlayer = audioPromptPlayer;
             this._audioMixer.OnMixedAudioDataAvailable += this.FireOnMixedAudioData;
         }
@@ -69,10 +66,14 @@ namespace Agent.Telephone.Providers.AudioProcessor
             return true;
         }
 
-        public bool TryBeginInitialGreeting(ActiveCallContext activeCall, bool isInbound)
+        public bool TryBeginInitialGreeting(ActiveCallContext activeCall)
         {
-            if (!IsInitialGreetingCall(isInbound, activeCall.AssistantConfig, this._config.AssistantConfigs))
+            if (!HasInitialGreeting(activeCall.AssistantConfig))
             {
+                this.Logger.LogWarning(
+                    "Agent {AssistantNumber} 的首呼问候配置无效，设备 {DeviceId} 将直接进入正常通话。",
+                    activeCall.AssistantConfig.DialingNumber,
+                    activeCall.DeviceId);
                 return false;
             }
 
@@ -232,7 +233,7 @@ namespace Agent.Telephone.Providers.AudioProcessor
             {
                 try
                 {
-                    string? helloMessage = this.GetHelloMessage();
+                    string? helloMessage = GetHelloMessage(activeCall.AssistantConfig);
                     if (helloMessage is null)
                     {
                         this.Logger.LogWarning("客服首呼问候文本为空，设备 {DeviceId} 将直接进入正常通话。", activeCall.DeviceId);
@@ -341,24 +342,21 @@ namespace Agent.Telephone.Providers.AudioProcessor
             }
         }
 
-        private string? GetHelloMessage()
+        internal static bool HasInitialGreeting(AssistantConfig assistant)
         {
-            string[] templates = this._config.PromptConfig.HelloMessageTempletes
+            return !string.IsNullOrWhiteSpace(assistant.DialingNumber) &&
+                assistant.DialingNumber.All(static character => character is >= '0' and <= '9') &&
+                assistant.HelloMessageTempletes?.Any(static template => !string.IsNullOrWhiteSpace(template)) == true;
+        }
+
+        private static string? GetHelloMessage(AssistantConfig assistant)
+        {
+            string[] templates = (assistant.HelloMessageTempletes ?? [])
                 .Where(static template => !string.IsNullOrWhiteSpace(template))
                 .ToArray();
             return templates.Length == 0
                 ? null
                 : templates[Random.Shared.Next(templates.Length)];
-        }
-
-        internal static bool IsInitialGreetingCall(bool isInbound, AssistantConfig assistant, IReadOnlyList<AssistantConfig> assistantConfigs)
-        {
-            return isInbound &&
-                assistantConfigs.Count > 0 &&
-                string.Equals(
-                    assistant.DialingNumber,
-                    assistantConfigs[0].DialingNumber,
-                    StringComparison.Ordinal);
         }
 
         internal static IReadOnlyList<string> GetGreetingAudioFiles(string assistantNumber)

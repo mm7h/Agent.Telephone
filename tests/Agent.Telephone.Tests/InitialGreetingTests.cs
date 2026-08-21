@@ -43,15 +43,49 @@ public sealed class InitialGreetingTests
     }
 
     [Fact]
-    public void IsInitialGreetingCall_OnlyMatchesInboundCallForFirstAssistant()
+    public void HasInitialGreeting_AcceptsEveryAssistantWithTemplatesAndNumericNumber()
     {
-        var customer = new AssistantConfig { DialingNumber = "10000" };
-        var otherAssistant = new AssistantConfig { DialingNumber = "10086" };
-        List<AssistantConfig> assistants = [customer, otherAssistant];
+        var customer = new AssistantConfig
+        {
+            DialingNumber = "10000",
+            HelloMessageTempletes = ["您好"]
+        };
+        var otherAssistant = new AssistantConfig
+        {
+            DialingNumber = "10086",
+            HelloMessageTempletes = ["您好"]
+        };
 
-        Assert.True(DefaultAudioProcessor.IsInitialGreetingCall(isInbound: true, customer, assistants));
-        Assert.False(DefaultAudioProcessor.IsInitialGreetingCall(isInbound: true, otherAssistant, assistants));
-        Assert.False(DefaultAudioProcessor.IsInitialGreetingCall(isInbound: false, customer, assistants));
+        Assert.True(DefaultAudioProcessor.HasInitialGreeting(customer));
+        Assert.True(DefaultAudioProcessor.HasInitialGreeting(otherAssistant));
+    }
+
+    [Theory]
+    [InlineData("10000", new[] { " " })]
+    [InlineData("100-00", new[] { "您好" })]
+    public void HasInitialGreeting_RejectsMissingTemplateOrNonNumericNumber(
+        string dialingNumber,
+        string[] templates)
+    {
+        var assistant = new AssistantConfig
+        {
+            DialingNumber = dialingNumber,
+            HelloMessageTempletes = templates.ToList()
+        };
+
+        Assert.False(DefaultAudioProcessor.HasInitialGreeting(assistant));
+    }
+
+    [Fact]
+    public void HasInitialGreeting_RejectsNullTemplates()
+    {
+        var assistant = new AssistantConfig
+        {
+            DialingNumber = "10000",
+            HelloMessageTempletes = null!
+        };
+
+        Assert.False(DefaultAudioProcessor.HasInitialGreeting(assistant));
     }
 
     [Fact]

@@ -14,6 +14,7 @@
             this.TTS = string.Empty;
             this.TTSSettings = [];
             this.AllowedTools = [];
+            this.HelloMessageTempletes = [];
         }
         public string DialingNumber { get; set; }
         public string Name { get; set; }
@@ -25,5 +26,6 @@
         public string TTS { get; set; }
         public List<Dictionary<string, string>> TTSSettings { get; set; }
         public List<string> AllowedTools { get; set; }
+        public List<string> HelloMessageTempletes { get; set; }
     }
 }

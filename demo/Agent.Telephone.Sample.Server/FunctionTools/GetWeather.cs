@@ -30,9 +30,10 @@ namespace Agent.Telephone.Sample.Server.FunctionTools
             return base.OnDeviceClosedAsync();
         }
 
-        [Description("查询指定城市的天气。调用前先告知用户：确认查询请按1，取消请按2，重新播报菜单请按星号键，结束本次操作请按井号键。")]
+        [Description("查询指定城市的天气。")]
         [ToolBehavior(ToolAction.DirectResponse,
-            DtmfKeys = DtmfKey.One | DtmfKey.Two | DtmfKey.Star | DtmfKey.Pound)]
+            DtmfKeys = DtmfKey.One | DtmfKey.Two | DtmfKey.Pound,
+            DtmfPrompt = "确认查询请按1，取消请按2，结束本次操作请按井号键。")]
         public FunctionReturn<string> GetWeatherInfo([Description("要查询天气的城市名称")] string? city, DtmfInputResult dtmfInput)
         {
             this.Logger.LogInformation("尝试查询城市 {City} 的天气，DTMF 输入结果：{DtmfInput}", city, dtmfInput);
@@ -50,8 +51,7 @@ namespace Agent.Telephone.Sample.Server.FunctionTools
                 string response = dtmfInput.Status switch
                 {
                     DtmfInputStatus.TimedOut => "您的按键已超时，请重新再试。",
-                    DtmfInputStatus.Accepted when dtmfInput.SelectedKey == DtmfKey.Two => "已取消查询天气。",
-                    DtmfInputStatus.Accepted when dtmfInput.SelectedKey == DtmfKey.Star => "查询天气请按1，取消请按2，重新播报菜单请按星号键，结束请按井号键。",
+                    DtmfInputStatus.Accepted when dtmfInput.SelectedKey == DtmfKey.Two => "用户取消了查询。",
                     DtmfInputStatus.Accepted when dtmfInput.SelectedKey == DtmfKey.Pound => "本次天气查询已结束。",
                     _ => dtmfInput.Message ?? "当前无法查询天气。",
                 };

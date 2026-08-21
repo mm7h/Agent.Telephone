@@ -34,5 +34,10 @@ namespace Agent.Telephone.Abstractions.Common.Attributes
         /// 多个键可以使用按位或运算符进行组合。
         /// </summary>
         public DtmfKey DtmfKeys { get; set; } = DtmfKey.None;
+
+        /// <summary>
+        /// 调用 DTMF 工具前由系统播放的固定按键提示。
+        /// </summary>
+        public string? DtmfPrompt { get; set; }
     }
 }

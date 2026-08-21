@@ -13,19 +13,18 @@
     "AgentInitializationTimeoutSeconds": 30,
     "CallbackTimeoutSeconds": 30
   },
-  "PromptConfig": {
-    // 电话接通后，接线员的第一句话模板。随机选择一条作为开场白。
-    "HelloMessageTempletes": [
-      "您好，请问有什么可以帮您？",
-      "您好，请问您需要咨询什么问题？",
-      "您好，请问有什么问题需要协助？",
-      "您好，遇到什么问题需要帮助？"
-    ]
-  },
   "AssistantConfigs": [
     {
       "DialingNumber": "10000",
-      "Name": "Operator",
+      "Name": "智能服务前台",
+      // 电话接通后，随机选择一条作为开场白。
+      "HelloMessageTempletes": [
+        "您好，这里是智能服务前台。请问您想咨询日常问题，还是需要写作与语言方面的帮助？",
+        "您好，我是智能服务前台。请告诉我您的需求，我来为您安排合适的助理。",
+        "欢迎来电，这里是智能服务前台。您可以说说今天需要什么帮助。",
+        "您好，智能服务前台为您服务。您想进行通用咨询，还是处理写作、翻译或表达问题？",
+        "您好，感谢来电。请简要说一下您的需求，我会为您转接合适的助理。"
+      ],
       "Prompt": "AssistantPrompts/10000.md", // 角色提示词文件
       "VAD": "SileroNative",
       "ASR": "SenseVoice",
@@ -56,7 +55,14 @@
     },
     {
       "DialingNumber": "10086",
-      "Name": "DefaultAssistant 1",
+      "Name": "通用问答助理",
+      "HelloMessageTempletes": [
+        "您好，这里是通用问答助理。今天有什么问题想一起聊聊？",
+        "您好，我是通用问答助理。无论是生活疑问还是思路梳理，都可以告诉我。",
+        "欢迎来电，通用问答助理为您服务。请问您想咨询什么？",
+        "您好，有什么想了解、分析或一起想想的问题吗？",
+        "您好，我是您的通用问答助理。请直接说说您现在最需要解决的事。"
+      ],
       "Prompt": "AssistantPrompts/10086.md",
       "VAD": "SileroNative",
       "ASR": "SenseVoice",
@@ -78,7 +84,14 @@
     },
     {
       "DialingNumber": "10085",
-      "Name": "DefaultAssistant 2",
+      "Name": "写作与语言助理",
+      "HelloMessageTempletes": [
+        "您好，这里是写作与语言助理。您想起草、润色、改写还是翻译一段文字？",
+        "您好，我是写作与语言助理。请告诉我文字的用途，我来帮您组织表达。",
+        "欢迎来电，写作与语言助理为您服务。您今天想优化哪一段文字？",
+        "您好，需要写文案、改措辞、做翻译，还是调整语气吗？",
+        "您好，我可以帮您把想法写得更清楚自然。请说说您要表达什么。"
+      ],
       "Prompt": "AssistantPrompts/10085.md",
       "VAD": "SileroNative",
       "ASR": "SenseVoice",

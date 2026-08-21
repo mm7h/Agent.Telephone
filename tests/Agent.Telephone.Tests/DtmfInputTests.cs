@@ -11,6 +11,7 @@ using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.FunctionTools;
 using Agent.Telephone.Helpers;
 using Agent.Telephone.Management;
+using Agent.Telephone.Providers;
 using Agent.Telephone.Providers.Dtmf;
 using Agent.Telephone.Providers.LLM.Contexts;
 using Microsoft.Extensions.AI;
@@ -135,86 +136,221 @@ public sealed class DtmfInputTests
     }
 
     [Fact]
-    public async Task DtmfGatedAIFunction_HidesTheInjectedResultAndWaitsBeforeInvokingTheToolAsync()
+    public async Task DtmfGatedAIFunction_PlaysPromptMutesMicrophoneAndWaitsBeforeInvokingTheToolAsync()
     {
+        using TestCallSession session = CreateCall();
         var target = new GatedToolTarget();
-        var completion = new TaskCompletionSource<DtmfInputResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var control = new TestAssistantControl(token => completion.Task.WaitAsync(token));
+        var input = new BlockingDtmfInput();
+        session.Call.AIAgentContext.PrivateProvider.SetDtmfInput(input);
+        var promptStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        session.Call.AIAgentContext.SetPromptSynthesizer((content, paragraphId, sentenceId, cancellationToken) =>
+        {
+            Assert.Equal("确认查询请按1。", content);
+            Assert.True(session.Call.IsUserAudioInputPaused);
+            promptStarted.TrySetResult();
+            return Task.FromResult(true);
+        });
         AIFunction inner = CreateTargetFunction(target);
-        var function = new DtmfGatedAIFunction(inner, control, DtmfKey.One | DtmfKey.Star, "dtmfInput");
+        var function = new DtmfGatedAIFunction(
+            inner,
+            session.Call.AIAgentContext,
+            DtmfKey.One,
+            "确认查询请按1。",
+            "dtmfInput");
 
         FunctionMetadata metadata = FunctionToolHelper.ToFunctionMetadata(inner);
         Assert.DoesNotContain(metadata.Parameters!, parameter => parameter.Name == "dtmfInput");
 
-        ValueTask<object?> invocation = function.InvokeAsync(
+        Task<object?> invocation = function.InvokeAsync(
             new AIFunctionArguments(new Dictionary<string, object?> { ["city"] = "北京" }),
-            CancellationToken.None);
+            CancellationToken.None).AsTask();
+        await promptStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
         Assert.False(target.Invoked);
-        Assert.Equal(DtmfKey.One | DtmfKey.Star, control.RequestedKeys);
+        Assert.True(session.Call.IsUserAudioInputPaused);
+        Assert.False(input.RequestStarted.Task.IsCompleted);
 
-        completion.SetResult(new DtmfInputResult(DtmfInputStatus.Accepted) { SelectedKey = DtmfKey.Star });
+        session.Call.CompletePromptPlayback(fullyPlayed: true);
+        await input.RequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.True(session.Call.IsUserAudioInputPaused);
+
+        input.Complete(new DtmfInputResult(DtmfInputStatus.Accepted) { SelectedKey = DtmfKey.One });
         await invocation;
 
         Assert.True(target.Invoked);
-        Assert.Equal(DtmfKey.Star, target.Input!.SelectedKey);
+        Assert.Equal(DtmfKey.One, target.Input!.SelectedKey);
+        Assert.False(session.Call.IsUserAudioInputPaused);
     }
 
     [Fact]
-    public async Task DtmfGatedAIFunction_InjectsTimeoutAndDoesNotRunOnCancellationAsync()
+    public async Task DtmfGatedAIFunction_RejectsConcurrentMenusWithoutPlayingAnotherPromptAsync()
     {
-        var timeoutTarget = new GatedToolTarget();
-        var timeoutControl = new TestAssistantControl(_ => Task.FromResult(
-            new DtmfInputResult(DtmfInputStatus.TimedOut, "超时")));
-        var timeoutFunction = new DtmfGatedAIFunction(
-            CreateTargetFunction(timeoutTarget),
-            timeoutControl,
-            DtmfKey.Pound,
-            "dtmfInput");
+        using TestCallSession session = CreateCall();
+        var input = new BlockingDtmfInput();
+        session.Call.AIAgentContext.PrivateProvider.SetDtmfInput(input);
+        var promptStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int promptCount = 0;
+        session.Call.AIAgentContext.SetPromptSynthesizer((content, paragraphId, sentenceId, cancellationToken) =>
+        {
+            Interlocked.Increment(ref promptCount);
+            promptStarted.TrySetResult();
+            return Task.FromResult(true);
+        });
 
-        await timeoutFunction.InvokeAsync(
+        var firstTarget = new GatedToolTarget();
+        var firstFunction = new DtmfGatedAIFunction(
+            CreateTargetFunction(firstTarget),
+            session.Call.AIAgentContext,
+            DtmfKey.One,
+            "确认请按1。",
+            "dtmfInput");
+        Task<object?> firstInvocation = firstFunction.InvokeAsync(
+            new AIFunctionArguments(new Dictionary<string, object?> { ["city"] = "北京" }),
+            CancellationToken.None).AsTask();
+        await promptStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        var secondTarget = new GatedToolTarget();
+        var secondFunction = new DtmfGatedAIFunction(
+            CreateTargetFunction(secondTarget),
+            session.Call.AIAgentContext,
+            DtmfKey.Two,
+            "取消请按2。",
+            "dtmfInput");
+        await secondFunction.InvokeAsync(
             new AIFunctionArguments(new Dictionary<string, object?> { ["city"] = "北京" }),
             CancellationToken.None);
+
+        Assert.Equal(1, promptCount);
+        Assert.Equal(DtmfInputStatus.AlreadyWaiting, secondTarget.Input!.Status);
+        Assert.True(session.Call.IsUserAudioInputPaused);
+
+        session.Call.CompletePromptPlayback(fullyPlayed: true);
+        await input.RequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        input.Complete(new DtmfInputResult(DtmfInputStatus.Accepted) { SelectedKey = DtmfKey.One });
+        await firstInvocation;
+
+        Assert.True(firstTarget.Invoked);
+        Assert.False(session.Call.IsUserAudioInputPaused);
+    }
+
+    [Fact]
+    public async Task RequestDtmfInteractionAsync_PreservesAnExistingMicrophonePauseAsync()
+    {
+        using TestCallSession session = CreateCall();
+        var input = new BlockingDtmfInput();
+        session.Call.AIAgentContext.PrivateProvider.SetDtmfInput(input);
+        session.Call.PauseUserAudioInput();
+        session.Call.AIAgentContext.SetPromptSynthesizer((content, paragraphId, sentenceId, cancellationToken) =>
+        {
+            session.Call.CompletePromptPlayback(fullyPlayed: true);
+            return Task.FromResult(true);
+        });
+
+        Task<DtmfInputResult> interaction = session.Call.AIAgentContext.RequestDtmfInteractionAsync(
+            "确认请按1。",
+            DtmfKey.One,
+            CancellationToken.None);
+        await input.RequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        input.Complete(new DtmfInputResult(DtmfInputStatus.Accepted) { SelectedKey = DtmfKey.One });
+
+        Assert.Equal(DtmfKey.One, (await interaction).SelectedKey);
+        Assert.True(session.Call.IsUserAudioInputPaused);
+    }
+
+    [Fact]
+    public async Task DtmfGatedAIFunction_HandlesUnavailableTimeoutAndCancellationAsync()
+    {
+        using TestCallSession unavailableSession = CreateCall();
+        var unavailableTarget = new GatedToolTarget();
+        var unavailableInput = new BlockingDtmfInput();
+        unavailableSession.Call.AIAgentContext.PrivateProvider.SetDtmfInput(unavailableInput);
+        unavailableSession.Call.AIAgentContext.SetPromptSynthesizer((content, paragraphId, sentenceId, cancellationToken) =>
+            Task.FromResult(false));
+        var unavailableFunction = new DtmfGatedAIFunction(
+            CreateTargetFunction(unavailableTarget),
+            unavailableSession.Call.AIAgentContext,
+            DtmfKey.Pound,
+            "结束请按井号键。",
+            "dtmfInput");
+
+        await unavailableFunction.InvokeAsync(
+            new AIFunctionArguments(new Dictionary<string, object?> { ["city"] = "北京" }),
+            CancellationToken.None);
+        Assert.True(unavailableTarget.Invoked);
+        Assert.Equal(DtmfInputStatus.Unavailable, unavailableTarget.Input!.Status);
+        Assert.False(unavailableInput.RequestStarted.Task.IsCompleted);
+        Assert.False(unavailableSession.Call.IsUserAudioInputPaused);
+
+        using TestCallSession timeoutSession = CreateCall();
+        var timeoutTarget = new GatedToolTarget();
+        var timeoutInput = new BlockingDtmfInput();
+        timeoutSession.Call.AIAgentContext.PrivateProvider.SetDtmfInput(timeoutInput);
+        timeoutSession.Call.AIAgentContext.SetPromptSynthesizer((content, paragraphId, sentenceId, cancellationToken) =>
+        {
+            timeoutSession.Call.CompletePromptPlayback(fullyPlayed: true);
+            return Task.FromResult(true);
+        });
+        var timeoutFunction = new DtmfGatedAIFunction(
+            CreateTargetFunction(timeoutTarget),
+            timeoutSession.Call.AIAgentContext,
+            DtmfKey.One,
+            "确认请按1。",
+            "dtmfInput");
+
+        Task<object?> timeoutInvocation = timeoutFunction.InvokeAsync(
+            new AIFunctionArguments(new Dictionary<string, object?> { ["city"] = "北京" }),
+            CancellationToken.None).AsTask();
+        await timeoutInput.RequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        timeoutInput.Complete(new DtmfInputResult(DtmfInputStatus.TimedOut, "超时"));
+        await timeoutInvocation;
+
         Assert.True(timeoutTarget.Invoked);
         Assert.Equal(DtmfInputStatus.TimedOut, timeoutTarget.Input!.Status);
+        Assert.False(timeoutSession.Call.IsUserAudioInputPaused);
 
+        using TestCallSession cancelledSession = CreateCall();
         var cancelledTarget = new GatedToolTarget();
-        var cancelledCompletion = new TaskCompletionSource<DtmfInputResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var cancelledControl = new TestAssistantControl(token => cancelledCompletion.Task.WaitAsync(token));
+        cancelledSession.Call.AIAgentContext.PrivateProvider.SetDtmfInput(new BlockingDtmfInput());
+        cancelledSession.Call.AIAgentContext.SetPromptSynthesizer((content, paragraphId, sentenceId, cancellationToken) =>
+            Task.FromResult(true));
         var cancelledFunction = new DtmfGatedAIFunction(
             CreateTargetFunction(cancelledTarget),
-            cancelledControl,
+            cancelledSession.Call.AIAgentContext,
             DtmfKey.One,
+            "确认请按1。",
             "dtmfInput");
         using var cancellation = new CancellationTokenSource();
 
-        ValueTask<object?> invocation = cancelledFunction.InvokeAsync(
+        Task<object?> invocation = cancelledFunction.InvokeAsync(
             new AIFunctionArguments(new Dictionary<string, object?> { ["city"] = "北京" }),
-            cancellation.Token);
+            cancellation.Token).AsTask();
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await invocation);
         Assert.False(cancelledTarget.Invoked);
+        Assert.False(cancelledSession.Call.IsUserAudioInputPaused);
     }
 
     [Fact]
-    public void FunctionToolManager_RejectsDtmfToolsWithoutTheRequiredSignatureOrIntentMode()
+    public void FunctionToolManager_RejectsDtmfToolsWithoutPromptRequiredSignatureOrIntentMode()
     {
         Assert.False(BuildFunctionTools<MissingDtmfResultTool>("FunctionCall"));
+        Assert.False(BuildFunctionTools<MissingDtmfPromptTool>("FunctionCall"));
+        Assert.False(BuildFunctionTools<UnexpectedDtmfPromptTool>("FunctionCall"));
         Assert.False(BuildFunctionTools<ValidDtmfTool>("IntentLlm"));
+        Assert.True(BuildFunctionTools<ValidDtmfTool>("FunctionCall"));
     }
 
     [Fact]
-    public void FunctionToolManager_ListsEachAcceptedDtmfKeyInTheGeneratedDescription()
+    public void FunctionToolManager_TellsLlmThatSystemManagesTheDtmfPrompt()
     {
         MethodInfo method = typeof(FunctionToolManager).GetMethod(
-            "BuildDtmfKeyInstruction",
+            "BuildDtmfToolInstruction",
             BindingFlags.NonPublic | BindingFlags.Static)!;
 
-        string instruction = Assert.IsType<string>(method.Invoke(
-            null,
-            [DtmfKey.Zero | DtmfKey.One | DtmfKey.Two | DtmfKey.Star | DtmfKey.Pound]));
+        string instruction = Assert.IsType<string>(method.Invoke(null, null));
 
-        Assert.Contains("当前函数可接受的 DTMF 按键为：0、1、2、*、#。", instruction);
+        Assert.Contains("系统会在调用后自动播放按键提示", instruction);
+        Assert.Contains("不要自行播报菜单", instruction);
     }
 
     private static AIFunction CreateTargetFunction(GatedToolTarget target)
@@ -303,35 +439,42 @@ public sealed class DtmfInputTests
         return new TestCallSession(transport, device, call);
     }
 
-    private sealed class TestAssistantControl : IAssistantControl
+    private sealed class BlockingDtmfInput : BaseProvider<BlockingDtmfInput, ModelSetting>, IDtmfInput
     {
-        private readonly Func<CancellationToken, Task<DtmfInputResult>> _request;
+        private readonly TaskCompletionSource<DtmfInputResult> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public TestAssistantControl(Func<CancellationToken, Task<DtmfInputResult>> request)
-        {
-            this._request = request;
-        }
-
-        public string? CallerNumber => null;
-        public string? AssistantNumber => null;
-        public bool IsCallActive => true;
-        public DtmfKey RequestedKeys { get; private set; }
-
-        public Task<AssistantSwitchResult> SwitchAssistantAsync(
-            string targetAssistantNumber,
-            CancellationToken cancellationToken = default) => throw new NotSupportedException();
-
-        public void HangupCurrentCall()
+        public BlockingDtmfInput()
+            : base(NullLogger<BlockingDtmfInput>.Instance)
         {
         }
+
+        public override string ProviderType => "dtmf-input";
+        public override string ModelName => nameof(BlockingDtmfInput);
+        public TaskCompletionSource RequestStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override bool Build(ModelSetting settings) => true;
 
         public Task<DtmfInputResult> RequestDtmfInputAsync(
+            ActiveCallContext call,
             DtmfKey keys,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken)
         {
-            this.RequestedKeys = keys;
-            return this._request(cancellationToken);
+            this.RequestStarted.TrySetResult();
+            return this._completion.Task.WaitAsync(cancellationToken);
         }
+
+        public Task<DtmfKey?> WaitForDtmfKeyAsync(
+            ActiveCallContext call,
+            DtmfKey keys,
+            TimeSpan timeout,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<DtmfKey?>(null);
+        }
+
+        public void HandleDtmfTone(ActiveCallContext call, byte tone) { }
+        public void Complete(DtmfInputResult result) => this._completion.TrySetResult(result);
+        public override void Dispose() { }
     }
 
     private sealed class GatedToolTarget
@@ -350,14 +493,28 @@ public sealed class DtmfInputTests
     private sealed class MissingDtmfResultTool : PrivateFunctionTool
     {
         [Description("请选择。")]
+        [ToolBehavior(DtmfKeys = DtmfKey.One, DtmfPrompt = "请选择。")]
+        public FunctionReturn<string> Choose() => new();
+    }
+
+    private sealed class MissingDtmfPromptTool : PrivateFunctionTool
+    {
+        [Description("请选择。")]
         [ToolBehavior(DtmfKeys = DtmfKey.One)]
+        public FunctionReturn<string> Choose(DtmfInputResult dtmfInput) => new();
+    }
+
+    private sealed class UnexpectedDtmfPromptTool : PrivateFunctionTool
+    {
+        [Description("请选择。")]
+        [ToolBehavior(DtmfPrompt = "请选择。")]
         public FunctionReturn<string> Choose() => new();
     }
 
     private sealed class ValidDtmfTool : PrivateFunctionTool
     {
         [Description("请选择。")]
-        [ToolBehavior(DtmfKeys = DtmfKey.One)]
+        [ToolBehavior(DtmfKeys = DtmfKey.One, DtmfPrompt = "请选择。")]
         public FunctionReturn<string> Choose(DtmfInputResult dtmfInput) => new();
     }
 

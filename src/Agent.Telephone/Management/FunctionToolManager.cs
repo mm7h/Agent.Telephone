@@ -28,7 +28,7 @@ namespace Agent.Telephone.Management
             DtmfKey.Four | DtmfKey.Five | DtmfKey.Six | DtmfKey.Seven |
             DtmfKey.Eight | DtmfKey.Nine | DtmfKey.Star | DtmfKey.Pound;
         private const string DTMF_TOOL_INSTRUCTION =
-            "调用此工具前，必须先以自然语音说明本描述定义的按键含义，再调用工具。不要在参数中提供按键结果；系统会等待一次按键并自动注入结果。";
+            "系统会在调用后自动播放按键提示并等待一次按键结果。识别到需求后直接调用此工具；不要在参数中提供按键结果，也不要自行播报菜单。";
 
         private readonly ILoggerFactory _loggerFactory;
 
@@ -152,7 +152,7 @@ namespace Agent.Telephone.Management
 
                 foreach (FunctionToolMethodMetadata methodMeta in methodMetas.Where(method => this.IsAllowed(activeCall.AssistantConfig, instance.GetType(), method)))
                 {
-                    FunctionToolRegistration registration = this.BuildRegistration(instance, methodMeta, assistantControl);
+                    FunctionToolRegistration registration = this.BuildRegistration(instance, methodMeta, activeCall.AIAgentContext);
                     activeCall.AIAgentContext.PrivateProvider.AddFunctionToolRegistration(registration);
                 }
             }
@@ -199,7 +199,7 @@ namespace Agent.Telephone.Management
 
                     foreach (FunctionToolMethodMetadata methodMeta in allowedMethods)
                     {
-                        FunctionToolRegistration registration = this.BuildRegistration(instance, methodMeta, assistantControl);
+                        FunctionToolRegistration registration = this.BuildRegistration(instance, methodMeta, activeCall.AIAgentContext);
                         activeCall.AIAgentContext.PrivateProvider.AddFunctionToolRegistration(instance, registration);
                     }
                 }
@@ -280,13 +280,14 @@ namespace Agent.Telephone.Management
         private FunctionToolRegistration BuildRegistration(
             object instance,
             FunctionToolMethodMetadata methodMeta,
-            IAssistantControl assistantControl)
+            AIAgentContext agentContext)
         {
             DtmfKey dtmfKeys = methodMeta.Behavior?.DtmfKeys ?? DtmfKey.None;
+            string? dtmfPrompt = methodMeta.Behavior?.DtmfPrompt;
             string description = methodMeta.Description ?? methodMeta.FunctionName;
             if (dtmfKeys != DtmfKey.None)
             {
-                description = $"{description}\n\n{BuildDtmfKeyInstruction(dtmfKeys)}";
+                description = $"{description}\n\n{BuildDtmfToolInstruction()}";
             }
 
             AIFunction aiFunction = AIFunctionFactory.Create(methodMeta.Method, instance, new AIFunctionFactoryOptions
@@ -307,8 +308,9 @@ namespace Agent.Telephone.Management
                     .Single(parameter => parameter.ParameterType == typeof(DtmfInputResult));
                 aiFunction = new DtmfGatedAIFunction(
                     aiFunction,
-                    assistantControl,
+                    agentContext,
                     dtmfKeys,
+                    dtmfPrompt!,
                     dtmfInputParameter.Name!);
             }
 
@@ -321,34 +323,9 @@ namespace Agent.Telephone.Management
                 dtmfKeys);
         }
 
-        private static string BuildDtmfKeyInstruction(DtmfKey keys)
+        private static string BuildDtmfToolInstruction()
         {
-            string acceptedKeys = string.Join(
-                "、",
-                Enum.GetValues<DtmfKey>()
-                    .Where(key => key != DtmfKey.None && keys.HasFlag(key))
-                    .Select(GetDtmfKeyLabel));
-            return $"当前函数可接受的 DTMF 按键为：{acceptedKeys}。\n{DTMF_TOOL_INSTRUCTION}";
-        }
-
-        private static string GetDtmfKeyLabel(DtmfKey key)
-        {
-            return key switch
-            {
-                DtmfKey.Zero => "0",
-                DtmfKey.One => "1",
-                DtmfKey.Two => "2",
-                DtmfKey.Three => "3",
-                DtmfKey.Four => "4",
-                DtmfKey.Five => "5",
-                DtmfKey.Six => "6",
-                DtmfKey.Seven => "7",
-                DtmfKey.Eight => "8",
-                DtmfKey.Nine => "9",
-                DtmfKey.Star => "*",
-                DtmfKey.Pound => "#",
-                _ => throw new ArgumentOutOfRangeException(nameof(key), key, null),
-            };
+            return DTMF_TOOL_INSTRUCTION;
         }
 
         private bool IsAllowed(AssistantConfig assistant, Type toolType, FunctionToolMethodMetadata methodMetadata)
@@ -387,6 +364,10 @@ namespace Agent.Telephone.Management
                     {
                         errors.Add($"Function tool '{toolName}' declares DtmfInputResult without DtmfKeys.");
                     }
+                    if (!string.IsNullOrWhiteSpace(method.Behavior?.DtmfPrompt))
+                    {
+                        errors.Add($"Function tool '{toolName}' declares DtmfPrompt without DtmfKeys.");
+                    }
                     continue;
                 }
 
@@ -398,9 +379,9 @@ namespace Agent.Telephone.Management
                 {
                     errors.Add($"DTMF-gated function tool '{toolName}' must declare exactly one DtmfInputResult parameter.");
                 }
-                if (string.IsNullOrWhiteSpace(method.Description))
+                if (string.IsNullOrWhiteSpace(method.Behavior?.DtmfPrompt))
                 {
-                    errors.Add($"DTMF-gated function tool '{toolName}' must declare a Description that explains its menu.");
+                    errors.Add($"DTMF-gated function tool '{toolName}' must declare a DtmfPrompt.");
                 }
             }
 

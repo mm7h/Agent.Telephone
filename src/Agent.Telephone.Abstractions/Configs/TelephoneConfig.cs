@@ -6,7 +6,6 @@
         {
             this.SIPConfig = default!;
             this.ModelConfig = default!;
-            this.PromptConfig = default!;
             this.AssistantConfigs = [];
             this.LogSetting = new();
         }
@@ -16,7 +15,6 @@
         public SIPConfig SIPConfig { get; set; }
         public List<AssistantConfig> AssistantConfigs { get; set; }
         public ModelConfig ModelConfig { get; set; }
-        public PromptConfig PromptConfig { get; set; }
     }
 
     #region Log

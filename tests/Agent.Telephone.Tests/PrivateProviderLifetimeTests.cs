@@ -144,7 +144,7 @@ public sealed class PrivateProviderLifetimeTests
         public Task<float[]> DecodeAsync(byte[] encodedData, AudioFormat format, CancellationToken token) => Task.FromResult(Array.Empty<float>());
         public Task<byte[]> EncodeAsync(float[] pcmData, AudioFormat format, CancellationToken token) => Task.FromResult(Array.Empty<byte>());
         public bool InitializeMixer(int outputSampleRate, int outputChannels, int frameDuration) => true;
-        public bool TryBeginInitialGreeting(ActiveCallContext activeCall, bool isInbound) => false;
+        public bool TryBeginInitialGreeting(ActiveCallContext activeCall) => false;
         public void StartInitialGreeting(ActiveCallContext activeCall, Func<string, string, string, CancellationToken, Task<bool>> synthesizePrompt) { }
         public Task<bool> PlayCachedPromptAsync(ActiveCallContext activeCall, IReadOnlyList<string> relativeFilePaths, CancellationToken cancellationToken) => Task.FromResult(false);
         public Task<bool> PlayFilePromptAsync(ActiveCallContext activeCall, string filePath, CancellationToken cancellationToken) => Task.FromResult(false);

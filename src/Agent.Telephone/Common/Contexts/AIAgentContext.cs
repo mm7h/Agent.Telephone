@@ -1,6 +1,8 @@
 ﻿using Microsoft.Extensions.AI;
 
 using System.Text;
+using Agent.Telephone.Abstractions.Common.Contexts;
+using Agent.Telephone.Abstractions.Common.Enums;
 using Agent.Telephone.Abstractions.Persistence;
 using Agent.Telephone.Providers;
 
@@ -11,6 +13,7 @@ namespace Agent.Telephone.Common.Contexts
         private readonly ActiveCallContext _activeCallContext;
         private readonly List<OfflineDialogueTurn> _completedOnlineTurns = [];
         private Func<string, string, string, CancellationToken, Task<bool>>? _synthesizePrompt;
+        private int _dtmfInteractionActive;
 
         public AIAgentContext(ActiveCallContext activeCallContext)
         {
@@ -41,9 +44,80 @@ namespace Agent.Telephone.Common.Contexts
                 return false;
             }
 
-            this._activeCallContext.PauseUserAudioInput();
+            if (!audioProcessor.TryBeginInitialGreeting(this._activeCallContext))
+            {
+                return false;
+            }
+
             audioProcessor.StartInitialGreeting(this._activeCallContext, this._synthesizePrompt);
             return true;
+        }
+
+        public async Task<DtmfInputResult> RequestDtmfInteractionAsync(
+            string prompt,
+            DtmfKey keys,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            this._activeCallContext.CallToken.ThrowIfCancellationRequested();
+            if (Interlocked.CompareExchange(ref this._dtmfInteractionActive, 1, 0) != 0)
+            {
+                return new DtmfInputResult(DtmfInputStatus.AlreadyWaiting, "当前正在等待按键。");
+            }
+
+            bool resumeUserAudioInput = false;
+            bool promptPlaybackStarted = false;
+            try
+            {
+                resumeUserAudioInput = !this._activeCallContext.IsUserAudioInputPaused;
+                if (resumeUserAudioInput)
+                {
+                    this._activeCallContext.PauseUserAudioInput();
+                }
+
+                Func<string, string, string, CancellationToken, Task<bool>>? synthesizePrompt = this._synthesizePrompt;
+                IDtmfInput? dtmfInput = this.PrivateProvider.DtmfInput;
+                if (string.IsNullOrWhiteSpace(prompt) || synthesizePrompt is null || dtmfInput is null)
+                {
+                    return new DtmfInputResult(DtmfInputStatus.Unavailable, "按键提示功能尚未就绪。");
+                }
+
+                Task<bool> playbackCompleted = this._activeCallContext.BeginPromptPlayback();
+                if (playbackCompleted.IsCompleted)
+                {
+                    return new DtmfInputResult(DtmfInputStatus.Unavailable, "当前无法播放按键提示。");
+                }
+
+                promptPlaybackStarted = true;
+                bool synthesisStarted = await synthesizePrompt(
+                    prompt,
+                    $"dtmf-{this._activeCallContext.CallId}-{this._activeCallContext.TurnId}",
+                    $"dtmf-{Guid.NewGuid():N}",
+                    cancellationToken);
+                if (!synthesisStarted || !await playbackCompleted.WaitAsync(cancellationToken))
+                {
+                    return new DtmfInputResult(DtmfInputStatus.Unavailable, "按键提示播放失败。");
+                }
+
+                return await dtmfInput.RequestDtmfInputAsync(
+                    this._activeCallContext,
+                    keys,
+                    cancellationToken);
+            }
+            finally
+            {
+                if (promptPlaybackStarted)
+                {
+                    this._activeCallContext.CompletePromptPlayback(fullyPlayed: false);
+                }
+
+                if (resumeUserAudioInput)
+                {
+                    this._activeCallContext.ResumeUserAudioInput();
+                }
+
+                Volatile.Write(ref this._dtmfInteractionActive, 0);
+            }
         }
 
         public void LoadPersistedChatHistory(IReadOnlyList<ConversationMessage> messages)

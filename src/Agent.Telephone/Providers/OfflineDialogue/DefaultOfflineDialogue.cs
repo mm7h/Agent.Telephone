@@ -405,14 +405,14 @@ namespace Agent.Telephone.Providers.OfflineDialogue
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 this.Logger.LogError(exception, "读取通话 {CallId} 的离线留言失败。", activeCall.CallId);
-                await this.ContinueInitialCallAsync(activeCall, synthesizePrompt);
+                await this.ContinueInitialCallAsync(activeCall);
                 return;
             }
 
             if (messages.Count == 0)
             {
                 this.Logger.LogInformation("通话 {CallId} 没有离线留言，将进行正常的初始通话流程。", activeCall.CallId);
-                await this.ContinueInitialCallAsync(activeCall, synthesizePrompt);
+                await this.ContinueInitialCallAsync(activeCall);
                 return;
             }
             if (!activeCall.TryAcquireUse(out IDisposable? lease) || lease is null)
@@ -592,20 +592,17 @@ namespace Agent.Telephone.Providers.OfflineDialogue
                 {
                     if (!activeCall.CallToken.IsCancellationRequested)
                     {
-                        await this.ContinueInitialCallAsync(activeCall, synthesizePrompt);
+                        await this.ContinueInitialCallAsync(activeCall);
                     }
                 }
             }
         }
 
         private Task ContinueInitialCallAsync(
-            ActiveCallContext activeCall,
-            Func<string, string, string, CancellationToken, Task<bool>> synthesizePrompt)
+            ActiveCallContext activeCall)
         {
-            IAudioProcessor? audioProcessor = activeCall.AIAgentContext.PrivateProvider.AudioProcessor;
-            if (audioProcessor?.TryBeginInitialGreeting(activeCall, isInbound: true) == true)
+            if (activeCall.AIAgentContext.TryStartInitialGreeting())
             {
-                audioProcessor.StartInitialGreeting(activeCall, synthesizePrompt);
                 return Task.CompletedTask;
             }
 

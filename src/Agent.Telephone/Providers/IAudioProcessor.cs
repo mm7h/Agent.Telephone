@@ -14,7 +14,7 @@ namespace Agent.Telephone.Providers
         Task<float[]> DecodeAsync(byte[] encodedData, AudioFormat format, CancellationToken token);
         Task<byte[]> EncodeAsync(float[] pcmData, AudioFormat format, CancellationToken token);
         bool InitializeMixer(int outputSampleRate, int outputChannels, int frameDuration);
-        bool TryBeginInitialGreeting(ActiveCallContext activeCall, bool isInbound);
+        bool TryBeginInitialGreeting(ActiveCallContext activeCall);
         void StartInitialGreeting(
             ActiveCallContext activeCall,
             Func<string, string, string, CancellationToken, Task<bool>> synthesizePrompt);
