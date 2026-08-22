@@ -106,6 +106,28 @@
       "AllowedTools": [
         "HangupCurrentCall"
       ]
+    },
+    {
+      "DialingNumber": "10088",
+      "Name": "Codex 任务助理",
+      "HelloMessageTempletes": [
+        "您好，这里是 Codex 任务助理。请说明希望我执行的任务；任务可能需要一些时间，您也可以挂断后等待回拨。"
+      ],
+      "Prompt": "AssistantPrompts/10088.md",
+      "VAD": "SileroNative",
+      "ASR": "SenseVoice",
+      "Intent": "FunctionCall",
+      "LLM": "Deepseek",
+      "TTS": "HuoshanBidirection",
+      "TTSSettings": [
+        {
+          "Speaker": "zh_female_wanwanxiaohe_moon_bigtts"
+        }
+      ],
+      "AllowedTools": [
+        "RunCodexTaskAsync",
+        "HangupCurrentCall"
+      ]
     }
   ],
   "ModelConfig": {

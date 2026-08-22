@@ -51,6 +51,7 @@ try
             .WithPrivateFunctionTools<GetWeather>()
             .WithPrivateFunctionTools<AssistantSwitch>()
             .WithPrivateFunctionTools<HangupCall>()
+            .WithPrivateFunctionTools<CodexAssistant>()
             // 多媒体文件格式支持
             .WithMedia(
                 useFFmpegAudioMixer: true,
