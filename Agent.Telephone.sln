@@ -12,8 +12,11 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "HT701 Settings", "HT701 Settings", "{8B20BBF5-7ECF-432F-A71D-D6522CF8AC40}"
 	ProjectSection(SolutionItems) = preProject
 		docs\HT701 Settings\1_basic_settings.md = docs\HT701 Settings\1_basic_settings.md
+		docs\HT701 Settings\1_basic_settings.png = docs\HT701 Settings\1_basic_settings.png
 		docs\HT701 Settings\2_advanced_sip_media_features.md = docs\HT701 Settings\2_advanced_sip_media_features.md
-		docs\HT701 Settings\3_system_management_security.md = docs\HT701 Settings\3_system_management_security.md
+		docs\HT701 Settings\2_advanced_sip_media_features.png = docs\HT701 Settings\2_advanced_sip_media_features.png
+		docs\HT701 Settings\3_FXS.md = docs\HT701 Settings\3_FXS.md
+		docs\HT701 Settings\3_FXS.png = docs\HT701 Settings\3_FXS.png
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "demo", "demo", "{2E418D11-92E9-47FB-80A8-518C7D9AB77E}"

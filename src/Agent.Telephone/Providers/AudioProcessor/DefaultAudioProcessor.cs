@@ -21,7 +21,35 @@ namespace Agent.Telephone.Providers.AudioProcessor
         private readonly IAudioPromptPlayer _audioPromptPlayer;
         private int _mixerSampleRate;
 
-        private const float InboundAudioGain = 15.848932f;
+        /* 音频输入增益倍数
+         +0 dB	1.000000	
+        +1 dB	1.122018
+        +2 dB	1.258925
+        +3 dB	1.412538
+        +4 dB	1.584893
+        +5 dB	1.778279
+        +6 dB	1.995262
+        +7 dB	2.238721
+        +8 dB	2.511886
+        +9 dB	2.818383
+        +10 dB	3.162278
+        +12 dB	3.981072
+        +11 dB	3.548134
+        +13 dB	4.466836
+        +14 dB	5.011872
+        +15 dB	5.623413
+        +16 dB	6.309573
+        +17 dB	7.079458
+        +18 dB	7.943282
+        +19 dB	8.912509
+        +20 dB	10.000000
+        +21 dB	11.220185
+        +22 dB	12.589254
+        +23 dB	14.125375
+		+24 dB	15.848932
+         */
+
+        private const float InboundAudioGain = 1.9952623f; // +6 dB
 
         public DefaultAudioProcessor(
             ISIPSorceryAudioCodec audioCodec,
