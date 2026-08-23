@@ -1,3 +1,18 @@
+# 🎧 HT701 高级 SIP 与媒体设置
+
+> 📌 本表用于辅助联调 SIP、RTP、DTMF 与媒体编解码。首次部署应优先遵循主文档中的 PCMU/PCMA 与 RFC2833 建议。
+
+```mermaid
+flowchart LR
+    A[模拟电话] --> B[HT701]
+    B -->|SIP 信令| C[Agent.Telephone]
+    B -->|RTP：PCMU / PCMA| C
+    B -->|DTMF：RFC2833| C
+    C -->|RTP 语音回复| B
+```
+
+*图：SIP 建立通话，RTP 承载双向语音；DTMF 建议作为独立的 RFC2833 事件传送。*
+
 | 参数名称 | 当前值/选项 | 说明/备注 |
 | :--- | :--- | :--- |
 | 管理员密码 | (隐藏) | 出于安全考虑不显示，用于管理员登录。 |

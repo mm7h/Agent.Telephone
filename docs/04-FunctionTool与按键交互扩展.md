@@ -1,10 +1,23 @@
-# FunctionTool 与按键交互扩展
+# 🧰 FunctionTool 与按键交互扩展
 
 本章面向需要为 Assistant 增加业务能力的开发者。FunctionTool 的公开方法会被转换为 LLM 可调用的函数；是否真的提供给某个 Assistant，仍由该 Assistant 的 `AllowedTools` 决定。
 
 > 本文基于当前工作区源码。长任务可复用已有的“挂断后完成并回拨/留言”对话生命周期；除非新增了对应的公共契约与测试，Private Function Tool 不应自行引入电话审批或回拨问答机制。
 
-## 1. 选择工具类型
+```mermaid
+flowchart LR
+    A[LLM 发起函数调用] --> B{AllowedTools 已授权？}
+    B -->|否| C[工具不会暴露]
+    B -->|是| D[FunctionTool]
+    D --> E[Adapter]
+    E --> F[Provider]
+    F --> G[业务服务或通话控制]
+    H[PrivateFunctionTool] -.通话级上下文.-> D
+```
+
+*图：LLM 只能调用被当前 Assistant 授权的工具；工具经 Adapter 访问 Provider，而非直接操作 SIP。*
+
+## 🧩 1. 选择工具类型
 
 | 类型 | 注册方式 | 生命周期 | 适用场景 | 可用上下文 |
 | --- | --- | --- | --- | --- |
@@ -17,7 +30,7 @@
 
 所有 **public 实例方法** 都会被扫描为候选函数（属性访问器和基类方法除外）。辅助方法请设为 `private` 或 `internal`，不要误暴露给 LLM。
 
-## 2. 注册、授权与生命周期
+## 🔐 2. 注册、授权与生命周期
 
 示例宿主在初始化后注册工具。全局工具使用无参构造；私有工具可以通过构造函数取得由宿主注册的依赖。
 
@@ -65,7 +78,7 @@ serverHost = serverBuilder
 
 现有示例可作为边界参考：`GetTime` 是全局工具；`GetWeather` 是带按键确认的私有工具；`HangupCall` 经 `CallControl.HangupCurrentCall()` 结束通话；`AssistantSwitch` 经 `CallControl.SwitchAssistantAsync()` 在原有 SIP/RTP 通话中切换角色。工具不得直接操作 `SIPUserAgent`、RTP 会话或具体 Call Controller。
 
-## 3. 最小工具示例
+## 🧪 3. 最小工具示例
 
 无通话状态的全局工具可以像示例项目的 `GetTime` 一样实现。由于它会以单例形式复用，下面的实现没有保存每次调用的状态：
 
@@ -145,7 +158,7 @@ public sealed class ConfirmOrderTool : PrivateFunctionTool
 
 此方法需要同时完成四项配置：注册 `WithPrivateFunctionTools<ConfirmOrderTool>()`、在目标 Assistant 的 `AllowedTools` 中加入 `ConfirmOrderAsync`、将 Assistant 的 `Intent` 配置为引用 `Type: FunctionCall` 的 Intent 项、保证该 Assistant 可使用 DTMF 的电话链路。不要让 LLM 把按键结果作为参数传入。
 
-## 4. DTMF 按键确认的工作方式
+## 🔢 4. DTMF 按键确认的工作方式
 
 当 `ToolBehavior` 同时声明 `DtmfKeys` 和 `DtmfPrompt` 时，工具管理器会：
 
@@ -166,7 +179,7 @@ public sealed class ConfirmOrderTool : PrivateFunctionTool
 
 建议为同一 Assistant 的危险操作分配互不重叠、语义稳定的按键，并在真实 HT701 上验证 RFC2833/DTMF 传递、超时、挂断和抢话后的取消行为。
 
-## 5. `10088` Codex 长任务工具
+## ⏳ 5. `10088` Codex 长任务工具
 
 示例宿主的 `CodexAssistant` 是无构造依赖的 `PrivateFunctionTool`。它只负责将明确任务作为一个参数传给 `codex exec --ephemeral`，同时持续读取 stdout/stderr，避免子进程缓冲阻塞。stdout 的最终消息会作为工具结果交还当前 LLM；stderr 仅被消费以避免阻塞，不会写入电话回复或日志。
 
@@ -174,7 +187,7 @@ public sealed class ConfirmOrderTool : PrivateFunctionTool
 
 当前版本刻意不包含等待音、电话 DTMF 审批、运行中追问、Codex Thread 恢复或写入沙箱。任务应在开始前就足够明确，并适合只读、非交互执行。需要这些能力时，应单独设计双向协议、权限与回拨生命周期，不能在工具中临时拼接。
 
-## 6. 二开检查清单
+## ✅ 6. 二开检查清单
 
 - 方法与参数的 `Description` 是否能让模型在正确场景调用，且不会泄漏密钥或用户隐私？
 - 是否只在 `AllowedTools` 中授权实际需要的 Assistant？

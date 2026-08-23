@@ -1,10 +1,10 @@
-# Assistant 角色与业务场景
+# 🎭 Assistant 角色与业务场景
 
 本文说明示例宿主中 `AssistantConfigs` 的角色设计，以及角色切换、回拨、离线留言和按键交互在电话链路中的实际行为。配置字段的完整说明见 [02-配置文件参考](02-配置文件参考.md)，Function Tool 的编写方式见 [04-FunctionTool与按键交互扩展](04-FunctionTool与按键交互扩展.md)。
 
 > 本文以当前工作区的 `demo/Agent.Telephone.Sample.Server/configs/config.json` 和源码为准。`10088` 是可选的 Codex 非交互任务助理；它不提供电话审批、追问或主机写入能力。
 
-## 1. Assistant 的绑定方式
+## 🧩 1. Assistant 的绑定方式
 
 一个 Assistant 由一个可拨打号码和一组运行时能力共同定义：
 
@@ -22,7 +22,7 @@ AssistantConfig（Prompt、VAD、ASR、Intent、LLM、TTS、AllowedTools）
 
 `AllowedTools` 是角色权限边界，而不是提示词中的建议。工具已注册但名称不在当前 Assistant 的 `AllowedTools` 中时，不会作为该角色的可用工具构建。提示词仍应只描述被允许的能力，避免模型尝试调用未授权工具。
 
-## 2. 示例角色矩阵
+## 🗺️ 2. 示例角色矩阵
 
 |号码|名称与定位|当前意图模式|当前可用工具|适合的场景|
 |---|---|---|---|---|
@@ -46,7 +46,11 @@ AssistantConfig（Prompt、VAD、ASR、Intent、LLM、TTS、AllowedTools）
 
 前台应在意图不清时只追问一个关键问题；确认后立即转接，不应代替专业 Assistant 处理后续内容。专业角色的 Prompt 同样应限制一次回复的长度和结构，避免把适合屏幕阅读的长段落、表格或代码直接播报到电话中。
 
-## 3. 当前通话内的角色切换
+## 🔁 3. 当前通话内的角色切换
+
+![同一 SIP 通话内的 Assistant 角色切换](assets/assistant-switch-lifecycle.png)
+
+> 🧭 图中蓝色连线表示持续存在的电话通话，琥珀色表示切换期间的等待/回铃，青绿色表示新角色成功就绪；下方 Mermaid 时序图描述准确执行顺序。
 
 “转接”在本项目中不是新建一通 SIP 电话。它保留现有的 SIP dialogue、`SIPUserAgent`、`VoIPMediaSession`、协商得到的音频格式和 RTP 会话；变化的只有 Assistant 配置及其 `AIAgentContext`（Provider、Handler、Private Function Tool）。因此用户不会收到第二次来电，也不需要重新接听。
 
@@ -85,7 +89,7 @@ AssistantConfig（Prompt、VAD、ASR、Intent、LLM、TTS、AllowedTools）
 
 因此，新增角色所依赖的模型、工具或外部服务应在上线前单独验证。不要在 Function Tool 内直接操作 SIP/RTP 对象；工具通过 `IAssistantControl` 和 `AssistantControlAdapter` 请求切换，底层控制仍由 Provider 负责。
 
-## 4. 在线对话、挂断后的回拨与离线留言
+## 📬 4. 在线对话、挂断后的回拨与离线留言
 
 每次用户语句对应一个 Turn。在线时，LLM 的文本片段继续送往 TTS/RTP；已完成的在线 Turn 先由当前 Agent 会话保留，并在通话关闭时以 `Read` 状态持久化。若用户在回复生成期间挂断，生成不必立即停止：系统将此 Turn 标为离线投递，立即持久化已生成和后续生成的文本片段，并在完成后尝试主动回拨。
 
@@ -111,7 +115,7 @@ AssistantConfig（Prompt、VAD、ASR、Intent、LLM、TTS、AllowedTools）
 
 留言与普通会话属于敏感数据。数据库和缓存位置、保留期及替换持久化实现见 [05-持久化、回拨与离线留言](05-持久化、回拨与离线留言.md)；生产保护要求见 [08-安全、隐私与生产运行边界](08-安全、隐私与生产运行边界.md)。
 
-## 5. DTMF 菜单与电话任务交互
+## 🔢 5. DTMF 菜单与电话任务交互
 
 DTMF 输入有两类用途：
 
@@ -122,7 +126,7 @@ DTMF 输入有两类用途：
 
 当前示例配置的注释已明确：需要按键反馈来触发自定义 Function Tool 时，应使用 `Intent: "FunctionCall"`。`10085` 使用 `IntentLlm`，不应把它当作 DTMF 工具交互入口。
 
-## 6. Codex 任务助理
+## 🧪 6. Codex 任务助理
 
 `10088` 将 `RunCodexTaskAsync` 暴露给电话中的模型。工具会：
 
@@ -133,7 +137,7 @@ DTMF 输入有两类用途：
 
 这项能力的风险仍高于普通问答。官方 `codex exec` 默认使用只读沙箱，示例不覆盖该默认值；服务必须在受控 Git 工作目录和低权限账户下运行，且只将工具授权给专用号码。具体安全要求见 [08-安全、隐私与生产运行边界](08-安全、隐私与生产运行边界.md)。
 
-## 7. 场景验收清单
+## ✅ 7. 场景验收清单
 
 完成角色配置或业务功能改动后，至少人工验证以下闭环：
 

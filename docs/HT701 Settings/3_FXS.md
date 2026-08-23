@@ -1,3 +1,21 @@
+# ☎️ HT701 FXS 账户与拨号设置
+
+> 📌 FXS 账户标识的是网关设备；Assistant 号码是用户在电话上拨打的业务号码。请不要混用两者。
+
+```mermaid
+sequenceDiagram
+    participant P as 模拟电话
+    participant G as HT701 FXS 账户
+    participant S as Agent.Telephone
+    G->>S: REGISTER（SIP 用户 ID / 认证 ID）
+    S-->>G: 注册成功
+    P->>G: 摘机并拨打 Assistant 号码
+    G->>S: INVITE（目标为 Assistant 号码）
+    S-->>G: 接通并协商 RTP 媒体
+```
+
+*图：FXS 账户负责设备注册；用户随后拨打的 Assistant 号码决定进入哪一个 AI 角色。*
+
 | 参数名称 | 当前值/选项 | 说明/备注 |
 | :--- | :--- | :--- |
 | 帐户开关 | Yes / No | 启用或禁用该 FXS 端口对应的 SIP 账户（当前选中 Yes）。 |
