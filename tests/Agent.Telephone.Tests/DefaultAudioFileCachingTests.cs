@@ -12,12 +12,18 @@ public sealed class DefaultAudioFileCachingTests
     [Fact]
     public void Load_CachesEmbeddedPromptMediaAndMapsSipCodes()
     {
+        List<TestStreamAudioPlayer> players = [];
         DefaultAudioFileCaching caching = new(
-            static () => new TestStreamAudioPlayer(),
+            () =>
+            {
+                TestStreamAudioPlayer player = new();
+                players.Add(player);
+                return player;
+            },
             NullLogger<DefaultAudioFileCaching>.Instance);
 
         Assert.True(caching.Load());
-        foreach (int sipCode in new[] { 180, 402, 404, 480, 486, 488, 503 })
+        foreach (int sipCode in new[] { 180, 402, 403, 404, 480, 486, 488, 503 })
         {
             Assert.True(caching.TryGetAudioBytes((SIPResponseStatusCodesEnum)sipCode, out byte[]? sipAudio));
             Assert.True(sipAudio is { Length: > 0 });
@@ -27,6 +33,15 @@ public sealed class DefaultAudioFileCachingTests
         Assert.True(numberAudio is { Length: > 0 });
         Assert.True(caching.TryGetAudioBytes("prompt/service_agent.mp3", out byte[]? promptAudio));
         Assert.True(promptAudio is { Length: > 0 });
+        Assert.True(caching.TryGetAudioBytes("error_feedback/400.mp3", out byte[]? badRequestAudio));
+        Assert.True(badRequestAudio is { Length: > 0 });
+        Assert.False(caching.TryGetAudioBytes("error_feedback/402_002.mp3", out _));
+        Assert.False(caching.TryGetAudioBytes("error_feedback/480_007.mp3", out _));
+        Assert.All(players, player =>
+        {
+            Assert.Equal(1, player.DecodeCallCount);
+            Assert.Equal(0, player.PlayCallCount);
+        });
     }
 
     private sealed class TestStreamAudioPlayer : IStreamAudioPlayer
@@ -52,6 +67,8 @@ public sealed class DefaultAudioFileCachingTests
         public bool IsSeeking => false;
         public float Volume { get; set; }
         public ISampleProcessor? CustomSampleProcessor { get; set; }
+        public int DecodeCallCount { get; private set; }
+        public int PlayCallCount { get; private set; }
 
         public Task<bool> CheckFFmpegInstalledAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
 
@@ -59,6 +76,14 @@ public sealed class DefaultAudioFileCachingTests
 
         public Task PlayAsync(CancellationToken cancellationToken = default)
         {
+            this.PlayCallCount++;
+            this.OnAudioDataAvailable?.Invoke([0.5f], true, true);
+            return Task.CompletedTask;
+        }
+
+        public Task DecodeAsync(CancellationToken cancellationToken = default)
+        {
+            this.DecodeCallCount++;
             this.OnAudioDataAvailable?.Invoke([0.5f], true, true);
             return Task.CompletedTask;
         }

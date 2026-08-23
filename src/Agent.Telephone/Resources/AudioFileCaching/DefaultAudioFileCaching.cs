@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
+using System.Buffers;
+using System.Buffers.Binary;
 using Agent.Telephone.Common.Constants;
-using Agent.Telephone.Helpers;
 using Agent.Telephone.Media.Abstractions;
 using Agent.Telephone.Media.Resource;
 using Microsoft.Extensions.Logging;
@@ -97,13 +98,18 @@ namespace Agent.Telephone.Resources.AudioFileCaching
         {
             using Stream audioStream = EmbeddedPromptMedia.OpenRead(relativeFilePath);
             using IStreamAudioPlayer player = this._audioPlayerFactory();
-            ConcurrentQueue<byte[]> frames = new();
+            ArrayBufferWriter<byte> cachedAudioWriter = new();
             void OnAudioData(float[] audioData, bool _, bool __)
             {
-                short[] pcm16 = audioData.PcmFloatToShort();
-                byte[] bytes = new byte[pcm16.Length * sizeof(short)];
-                Buffer.BlockCopy(pcm16, 0, bytes, 0, bytes.Length);
-                frames.Enqueue(bytes);
+                Span<byte> pcmBytes = cachedAudioWriter.GetSpan(audioData.Length * sizeof(short));
+                for (int index = 0; index < audioData.Length; index++)
+                {
+                    float sample = Math.Clamp(audioData[index], -1.0f, 1.0f);
+                    short pcm16 = sample >= 1.0f ? short.MaxValue : (short)(sample * 32768.0f);
+                    BinaryPrimitives.WriteInt16LittleEndian(pcmBytes.Slice(index * sizeof(short)), pcm16);
+                }
+
+                cachedAudioWriter.Advance(audioData.Length * sizeof(short));
             }
 
             player.OnAudioDataAvailable += OnAudioData;
@@ -122,8 +128,8 @@ namespace Agent.Telephone.Resources.AudioFileCaching
                     return false;
                 }
 
-                player.PlayAsync().GetAwaiter().GetResult();
-                byte[] cachedAudio = frames.SelectMany(static frame => frame).ToArray();
+                player.DecodeAsync().GetAwaiter().GetResult();
+                byte[] cachedAudio = cachedAudioWriter.WrittenSpan.ToArray();
                 if (cachedAudio.Length == 0)
                 {
                     this._logger.LogWarning("音频资源 {FilePath} 未产生 PCM 数据。", relativeFilePath);

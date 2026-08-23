@@ -8,6 +8,7 @@ using Agent.Telephone.Helpers;
 using Agent.Telephone.Management;
 using Agent.Telephone.Protocol.Server.Middlewares;
 using Agent.Telephone.Providers.CallControl.Reservations;
+using Agent.Telephone.Resources;
 using Agent.Telephone.Store;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -283,7 +284,7 @@ public sealed class SipRegistrarInboundTests
     }
 
     [Fact]
-    public async Task UdpInboundRejectsUnregisteredUnknownAssistantUnsupportedCodecAndBusyDeviceAsync()
+    public async Task UdpInboundPlaysPromptForEligibleErrorsAndRejectsUnsupportedCodecAndBusyDeviceAsync()
     {
         TelephoneConfig config = CreateConfig();
         using DefaultMemoryStore store = new();
@@ -294,8 +295,10 @@ public sealed class SipRegistrarInboundTests
         serverTransport.AddSIPChannel(serverChannel);
         clientTransport.AddSIPChannel(clientChannel);
 
+        var promptPlayer = new RecordingAudioPromptPlayer();
         using ServiceProvider services = new ServiceCollection()
             .AddLogging()
+            .AddSingleton<IAudioPromptPlayer>(promptPlayer)
             .BuildServiceProvider();
         DeviceContextManager deviceManager = CreateDeviceManager(store, config, services);
         FunctionToolManager functionTools = new(
@@ -318,6 +321,7 @@ public sealed class SipRegistrarInboundTests
             functionTools,
             handlers,
             providers,
+            promptPlayer,
             NullLogger<DeviceContainerMiddleware>.Instance);
         middleware.SubscribeSIPTransportEvents(serverTransport);
 
@@ -329,7 +333,8 @@ public sealed class SipRegistrarInboundTests
                 clientTransport,
                 serverEndPoint,
                 CreateInviteRequest(ASSISTANT_NUMBER, "0"));
-            Assert.Equal(SIPResponseStatusCodesEnum.Forbidden, unregistered.Status);
+            Assert.Equal(SIPResponseStatusCodesEnum.Ok, unregistered.Status);
+            Assert.Equal(2, promptPlayer.GetPlaybackCount(SIPResponseStatusCodesEnum.Forbidden));
 
             SIPRequest register = CreateRegisterRequest(
                 $"sip:{DEVICE_NUMBER}@{clientChannel.ListeningSIPEndPoint.GetIPEndPoint()}",
@@ -340,12 +345,15 @@ public sealed class SipRegistrarInboundTests
                 serverEndPoint,
                 register);
             Assert.Equal(SIPResponseStatusCodesEnum.Ok, registered.Status);
+            DeviceContext device = Assert.IsType<DeviceContext>(deviceManager.GetSIPDeviceById(register));
 
             SIPResponse unknownAssistant = await SendAndWaitForFinalResponseAsync(
                 clientTransport,
                 serverEndPoint,
                 CreateInviteRequest("2999", "0"));
-            Assert.Equal(SIPResponseStatusCodesEnum.NotFound, unknownAssistant.Status);
+            Assert.Equal(SIPResponseStatusCodesEnum.Ok, unknownAssistant.Status);
+            Assert.Equal(2, promptPlayer.GetPlaybackCount(SIPResponseStatusCodesEnum.NotFound));
+            Assert.Null(device.ActiveCall);
 
             SIPResponse unsupportedCodec = await SendAndWaitForFinalResponseAsync(
                 clientTransport,
@@ -353,7 +361,6 @@ public sealed class SipRegistrarInboundTests
                 CreateInviteRequest(ASSISTANT_NUMBER, "111"));
             Assert.Equal(SIPResponseStatusCodesEnum.NotAcceptableHere, unsupportedCodec.Status);
 
-            DeviceContext device = Assert.IsType<DeviceContext>(deviceManager.GetSIPDeviceById(register));
             Assert.True(device.TryBeginCallback());
             SIPResponse busy = await SendAndWaitForFinalResponseAsync(
                 clientTransport,
@@ -361,10 +368,108 @@ public sealed class SipRegistrarInboundTests
                 CreateInviteRequest(ASSISTANT_NUMBER, "0"));
             Assert.Equal(SIPResponseStatusCodesEnum.BusyHere, busy.Status);
             device.EndCallback();
+
+            SIPResponse providerFailure = await SendAndWaitForFinalResponseAsync(
+                clientTransport,
+                serverEndPoint,
+                CreateInviteRequest(ASSISTANT_NUMBER, "0"));
+            Assert.Equal(SIPResponseStatusCodesEnum.Ok, providerFailure.Status);
+            Assert.Equal(2, promptPlayer.GetPlaybackCount(SIPResponseStatusCodesEnum.TemporarilyUnavailable));
+
+            config.AuthEnabled = true;
+            SIPResponse authenticationUnavailable = await SendAndWaitForFinalResponseAsync(
+                clientTransport,
+                serverEndPoint,
+                CreateInviteRequest(ASSISTANT_NUMBER, "0"));
+            Assert.Equal(SIPResponseStatusCodesEnum.Ok, authenticationUnavailable.Status);
+            Assert.Equal(4, promptPlayer.GetPlaybackCount(SIPResponseStatusCodesEnum.Forbidden));
         }
         finally
         {
             middleware.UnsubscribeSIPTransportEvents(serverTransport);
+            serverTransport.Shutdown();
+            clientTransport.Shutdown();
+        }
+    }
+
+    [Fact]
+    public async Task UnregisteredInvite_PlaysForbiddenPromptTwiceThenHangsUpAsync()
+    {
+        TelephoneConfig config = CreateConfig();
+        using DefaultMemoryStore store = new();
+        using SIPTransport serverTransport = new();
+        using SIPTransport clientTransport = new();
+        var serverChannel = new SIPUDPChannel(IPAddress.Loopback, 0);
+        var clientChannel = new SIPUDPChannel(IPAddress.Loopback, 0);
+        serverTransport.AddSIPChannel(serverChannel);
+        clientTransport.AddSIPChannel(clientChannel);
+
+        var promptPlayer = new RecordingAudioPromptPlayer(TimeSpan.FromMilliseconds(100));
+        using ServiceProvider services = new ServiceCollection()
+            .AddLogging()
+            .AddSingleton<IAudioPromptPlayer>(promptPlayer)
+            .BuildServiceProvider();
+        DeviceContextManager deviceManager = CreateDeviceManager(store, config, services);
+        FunctionToolManager functionTools = new(
+            NullLoggerFactory.Instance,
+            services,
+            config,
+            NullLogger<FunctionToolManager>.Instance);
+        HandlerManager handlers = new(
+            services,
+            config,
+            NullLogger<HandlerManager>.Instance);
+        ProviderManager providers = new(
+            services,
+            config,
+            NullLogger<ProviderManager>.Instance);
+        var middleware = new DeviceContainerMiddleware(
+            services,
+            config,
+            deviceManager,
+            functionTools,
+            handlers,
+            providers,
+            promptPlayer,
+            NullLogger<DeviceContainerMiddleware>.Instance);
+        var clientUserAgent = new SIPUserAgent(clientTransport, null);
+        VoIPMediaSession clientMediaSession = CreateMediaSession();
+        var clientHungup = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        Action<SIPDialogue> onClientHungup = _ => clientHungup.TrySetResult(true);
+        clientUserAgent.OnCallHungup += onClientHungup;
+        middleware.SubscribeSIPTransportEvents(serverTransport);
+
+        try
+        {
+            SIPURI destination = serverChannel.GetContactURI(
+                SIPSchemesEnum.sip,
+                new SIPEndPoint(
+                    SIPProtocolsEnum.udp,
+                    new IPEndPoint(IPAddress.Loopback, 0)));
+            destination.User = ASSISTANT_NUMBER;
+
+            bool connected = await clientUserAgent.Call(
+                destination.ToString(),
+                null,
+                null,
+                clientMediaSession);
+
+            Assert.True(connected);
+            await clientHungup.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(2, promptPlayer.GetPlaybackCount(SIPResponseStatusCodesEnum.Forbidden));
+            Assert.False(clientUserAgent.IsCallActive);
+        }
+        finally
+        {
+            middleware.UnsubscribeSIPTransportEvents(serverTransport);
+            clientUserAgent.OnCallHungup -= onClientHungup;
+            if (clientUserAgent.IsCallActive)
+            {
+                clientUserAgent.Hangup();
+            }
+
+            clientMediaSession.Close("test ended");
             serverTransport.Shutdown();
             clientTransport.Shutdown();
         }
@@ -497,6 +602,14 @@ public sealed class SipRegistrarInboundTests
         }
     }
 
+    private static VoIPMediaSession CreateMediaSession()
+    {
+        var source = new AudioExtrasSource(
+            new AudioEncoder(SupportedAudioFormats.SupportedSDPAudioFormat),
+            new AudioSourceOptions { AudioSource = AudioSourcesEnum.None });
+        return new VoIPMediaSession(new MediaEndPoints { AudioSource = source });
+    }
+
     private sealed class TrackingDisposable : IDisposable
     {
         public bool IsDisposed { get; private set; }
@@ -504,6 +617,60 @@ public sealed class SipRegistrarInboundTests
         public void Dispose()
         {
             this.IsDisposed = true;
+        }
+    }
+
+    private sealed class RecordingAudioPromptPlayer : IAudioPromptPlayer
+    {
+        private readonly List<SIPResponseStatusCodesEnum> _playedCodes = [];
+        private readonly TimeSpan _playbackDelay;
+
+        public RecordingAudioPromptPlayer(TimeSpan? playbackDelay = null)
+        {
+            this._playbackDelay = playbackDelay ?? TimeSpan.Zero;
+        }
+
+        public async Task<bool> PlaySIPCodeAudioAsync(
+            SIPResponseStatusCodesEnum sipCode,
+            VoIPMediaSession mediaSession,
+            AudioFormat audioFormat,
+            int packetTimeMs,
+            CancellationToken cancellationToken)
+        {
+            this._playedCodes.Add(sipCode);
+            if (this._playbackDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(this._playbackDelay, cancellationToken);
+            }
+
+            return true;
+        }
+
+        public Task<bool> PlaySIPCodeAudioLoopAsync(
+            SIPResponseStatusCodesEnum sipCode,
+            VoIPMediaSession mediaSession,
+            AudioFormat audioFormat,
+            int packetTimeMs,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<bool> PlayCachedAudioFilesAsync(
+            IReadOnlyList<string> relativeFilePaths,
+            int outputSampleRate,
+            Action<float[]> onAudioData,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<bool> PlayFileAsync(
+            string filePath,
+            int outputSampleRate,
+            int packetTimeMs,
+            Action<float[]> onAudioData,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public int GetPlaybackCount(SIPResponseStatusCodesEnum sipCode) =>
+            this._playedCodes.Count(code => code == sipCode);
+
+        public void Dispose()
+        {
         }
     }
 

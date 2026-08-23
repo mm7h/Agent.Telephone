@@ -8,6 +8,19 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{B3E4F594-7932-4719-B62B-85377D419E97}"
+	ProjectSection(SolutionItems) = preProject
+		docs\00-快速开始与部署.md = docs\00-快速开始与部署.md
+		docs\01-HT701网关配置与兼容性.md = docs\01-HT701网关配置与兼容性.md
+		docs\02-配置文件参考.md = docs\02-配置文件参考.md
+		docs\03-系统架构与音频流水线.md = docs\03-系统架构与音频流水线.md
+		docs\04-FunctionTool与按键交互扩展.md = docs\04-FunctionTool与按键交互扩展.md
+		docs\05-持久化、回拨与离线留言.md = docs\05-持久化、回拨与离线留言.md
+		docs\06-Assistant角色与业务场景.md = docs\06-Assistant角色与业务场景.md
+		docs\07-故障排查与运维.md = docs\07-故障排查与运维.md
+		docs\08-安全、隐私与生产运行边界.md = docs\08-安全、隐私与生产运行边界.md
+		docs\09-项目目录、外部资源与内置提示音.md = docs\09-项目目录、外部资源与内置提示音.md
+		docs\README.md = docs\README.md
+	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "HT701 Settings", "HT701 Settings", "{8B20BBF5-7ECF-432F-A71D-D6522CF8AC40}"
 	ProjectSection(SolutionItems) = preProject

@@ -22,6 +22,7 @@ namespace Agent.Telephone.Common.Contexts
         private RegistrationState _registrationState;
         private CallState _callState;
         private bool _callbackActive;
+        private bool _errorPromptActive;
         private int _backgroundReplyCount;
         private int _persistenceCount;
         private string? _historyPersistenceCallId;
@@ -125,7 +126,7 @@ namespace Agent.Telephone.Common.Contexts
             {
                 lock (this._callSessionLock)
                 {
-                    return this._activeCall is not null || this._callbackActive || this._backgroundReplyCount > 0 || this._persistenceCount > 0;
+                    return this._activeCall is not null || this._callbackActive || this._errorPromptActive || this._backgroundReplyCount > 0 || this._persistenceCount > 0;
                 }
             }
         }
@@ -186,7 +187,7 @@ namespace Agent.Telephone.Common.Contexts
         {
             lock (this._callSessionLock)
             {
-                if (this._activeCall is not null || this._callbackActive || this._backgroundReplyCount > 0 || this._persistenceCount > 0)
+                if (this._activeCall is not null || this._callbackActive || this._errorPromptActive || this._backgroundReplyCount > 0 || this._persistenceCount > 0)
                 {
                     activeCall = null;
                     return false;
@@ -234,25 +235,6 @@ namespace Agent.Telephone.Common.Contexts
                 this._pendingServerUserAgent = null;
                 return serverUserAgent;
             }
-        }
-
-        public void RejectPendingCall(ActiveCallContext activeCall, SIPResponseStatusCodesEnum status, string reason)
-        {
-            SIPServerUserAgent? serverUserAgent;
-            lock (this._callSessionLock)
-            {
-                if (!ReferenceEquals(this._activeCall, activeCall))
-                {
-                    return;
-                }
-
-                serverUserAgent = this._pendingServerUserAgent;
-                this._pendingServerUserAgent = null;
-                this._callState = CallState.Failed;
-            }
-
-            serverUserAgent?.Reject(status, reason);
-            this.CloseCallSession(activeCall);
         }
 
         public bool TryBeginBackgroundReply(ActiveCallContext activeCall)
@@ -335,7 +317,7 @@ namespace Agent.Telephone.Common.Contexts
         {
             lock (this._callSessionLock)
             {
-                if (this._activeCall is not null || this._callbackActive)
+                if (this._activeCall is not null || this._callbackActive || this._errorPromptActive)
                 {
                     return false;
                 }
@@ -343,6 +325,38 @@ namespace Agent.Telephone.Common.Contexts
                 this._callbackActive = true;
                 this._callState = CallState.CallbackDialing;
                 return true;
+            }
+        }
+
+        public bool TryBeginErrorPrompt()
+        {
+            lock (this._callSessionLock)
+            {
+                if (this._activeCall is not null || this._callbackActive || this._errorPromptActive ||
+                    this._backgroundReplyCount > 0 || this._persistenceCount > 0)
+                {
+                    return false;
+                }
+
+                this._errorPromptActive = true;
+                this._callState = CallState.PlayingPrompt;
+                return true;
+            }
+        }
+
+        public void EndErrorPrompt()
+        {
+            lock (this._callSessionLock)
+            {
+                if (!this._errorPromptActive)
+                {
+                    return;
+                }
+
+                this._errorPromptActive = false;
+                this._callState = this._callbackActive
+                    ? CallState.CallbackDialing
+                    : CallState.Idle;
             }
         }
 
