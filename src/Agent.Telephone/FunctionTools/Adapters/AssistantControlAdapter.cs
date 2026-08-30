@@ -59,6 +59,16 @@ namespace Agent.Telephone.FunctionTools.Adapters
             this._activeCall.UserAgent.Hangup();
         }
 
+        public void HangupCurrentCallAfterReply()
+        {
+            if (!this._activeCall.UserAgent.IsCallActive)
+            {
+                return;
+            }
+
+            this._activeCall.TryBeginHangupAfterReply();
+        }
+
         public Task<DtmfInputResult> RequestDtmfInputAsync(
             DtmfKey keys,
             CancellationToken cancellationToken = default)

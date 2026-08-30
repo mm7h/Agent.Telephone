@@ -6,6 +6,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Version>0.1.0</Version>
+    <Authors>mm7h</Authors>
+    <Title>Agent.Telephone</Title>
+    <PackageIcon />
+    <Description>xiaozhi esp32的C#服务端，帮助你搭建属于自己的小智服务。Helps you build your own xiaozhi esp32 back-end service.</Description>
+    <RepositoryUrl>https://github.com/mm7h/Agent.Telephone</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/mm7h/Agent.Telephone</PackageProjectUrl>
   </PropertyGroup>
 
   <ItemGroup>

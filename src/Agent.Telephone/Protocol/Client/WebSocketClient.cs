@@ -32,10 +32,17 @@ namespace Agent.Telephone.Protocol.WebSocket
         public async Task ConnectAsync(string endpointUrl, CancellationToken cancellationToken = default)
         {
             this.EndpointUrl = new Uri(endpointUrl);
+            bool lockAcquired = false;
 
             try
             {
                 await this._socketSemaphore.WaitAsync(cancellationToken);
+                lockAcquired = true;
+
+                if (this._socket?.IsRunning == true)
+                {
+                    return;
+                }
 
                 if (this._socket is not null)
                 {
@@ -100,7 +107,10 @@ namespace Agent.Telephone.Protocol.WebSocket
             }
             finally
             {
-                this._socketSemaphore.Release();
+                if (lockAcquired)
+                {
+                    this._socketSemaphore.Release();
+                }
             }
         }
         public Task SendAsync(string text)
@@ -116,14 +126,13 @@ namespace Agent.Telephone.Protocol.WebSocket
 
         public async Task CloseAsync(WebSocketCloseStatus webSocketCloseStatus = WebSocketCloseStatus.Empty, string statusDescription = "")
         {
-            if (!this.IsConnected)
-            {
-                return;
-            }
+            bool lockAcquired = false;
             try
             {
-                this.OnClose?.Invoke(webSocketCloseStatus, statusDescription);
-                if (this._socket is not null)
+                await this._socketSemaphore.WaitAsync();
+                lockAcquired = true;
+
+                if (this._socket?.IsRunning == true)
                 {
                     await this._socket.StopOrFail(webSocketCloseStatus, statusDescription);
                 }
@@ -135,6 +144,13 @@ namespace Agent.Telephone.Protocol.WebSocket
             catch (Exception)
             {
                 this.OnError?.Invoke(WebSocketError.ConnectionClosedPrematurely, "无法优雅地关闭 WebSocket 连接。");
+            }
+            finally
+            {
+                if (lockAcquired)
+                {
+                    this._socketSemaphore.Release();
+                }
             }
         }
 

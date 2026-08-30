@@ -213,7 +213,7 @@ public sealed class PrivateProviderLifetimeTests
         public bool Build(Agent.Telephone.Common.Configs.LLMBuildConfig settings) => true;
         public void RegisterDevice(ActiveCallContext activeCall, ILlmEventCallback callback) { }
         public void UnregisterDevice(ActiveCallContext activeCall) => this.Events.Add("unregister");
-        public Task StartDialogueAsync(string userMessage, CancellationToken token) => Task.CompletedTask;
+        public Task StartDialogueAsync(long turnId, string userMessage, CancellationToken token) => Task.CompletedTask;
         public void Dispose() => this.Events.Add("dispose");
     }
 

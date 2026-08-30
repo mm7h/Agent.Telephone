@@ -19,6 +19,8 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         private readonly ObjectPool<Workflow<OutAudioSegment>> _audioWorkflowPool;
         private readonly ObjectPool<OutAudioSegment> _audioSegmentPool;
         private readonly SemaphoreSlim _synthesisLock = new(1, 1);
+        private long _synthesizingTurnId = -1;
+        private int _synthesisFailed;
 
         public Text2AudioHandler(ObjectPool<Workflow<OutSegment>> segmentWorkflowPool,
             ObjectPool<OutSegment> segmentPool,
@@ -70,7 +72,11 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         }
         public async Task HandleAsync(Workflow<OutSegment> workflow)
         {
-            await this.SynthesizeAsync(workflow, trackGeneratedAudio: true, this.HandlerToken);
+            bool synthesized = await this.SynthesizeAsync(workflow, trackGeneratedAudio: true, this.HandlerToken);
+            if (!synthesized)
+            {
+                this.ActiveCallContext.CompleteHangupAfterReply(workflow.TurnId);
+            }
         }
 
         public async Task<bool> SynthesizePromptAsync(
@@ -129,11 +135,14 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 await this._synthesisLock.WaitAsync(synthesisToken);
                 try
                 {
+                    Interlocked.Exchange(ref this._synthesizingTurnId, workflow.TurnId);
+                    Volatile.Write(ref this._synthesisFailed, 0);
                     await this._tts.SynthesisAsync(workflow, synthesisToken);
-                    return true;
+                    return Volatile.Read(ref this._synthesisFailed) == 0;
                 }
                 finally
                 {
+                    Interlocked.Exchange(ref this._synthesizingTurnId, -1);
                     this._synthesisLock.Release();
                 }
             }
@@ -207,7 +216,16 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
         public async void OnProcessed(string sentence, bool isFirstSegment, bool isLastSegment, TtsGenerateResult ttsGenerateResult)
         {
-            if (isLastSegment && ttsGenerateResult == TtsGenerateResult.Success)
+            if (ttsGenerateResult != TtsGenerateResult.Success)
+            {
+                if (Volatile.Read(ref this._synthesizingTurnId) >= 0)
+                {
+                    Volatile.Write(ref this._synthesisFailed, 1);
+                }
+                return;
+            }
+
+            if (isLastSegment)
             {
                 OutAudioSegment finalSegment = this._audioSegmentPool.Get();
                 finalSegment.Initialize(

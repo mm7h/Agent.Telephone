@@ -96,6 +96,10 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 this.Logger.LogDebug("设备 {deviceId} 未检测到语音。", this.ActiveCallContext.DeviceId);
                 return;
             }
+            if (this.ActiveCallContext.IsUserAudioInputPaused)
+            {
+                return;
+            }
             this.Logger.LogDebug("设备 {deviceId} 检测到语音文本: {text}", this.ActiveCallContext.DeviceId, text);
             this.ActiveCallContext.RestartTurn();
             Workflow<string> workflow = this._textWorkflowPool.Get();

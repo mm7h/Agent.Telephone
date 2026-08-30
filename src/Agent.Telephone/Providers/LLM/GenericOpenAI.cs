@@ -44,9 +44,7 @@ namespace Agent.Telephone.Providers.LLM
             {
                 this._subAgents.Clear();
                 this._dialogueWorkflow = null;
-                this._responseTimeoutSeconds = Math.Max(
-                    1,
-                    modelSetting.AgentSettings[SubAgentNames.ChatAgent].Config.GetConfigValueOrDefault("ResponseTimeoutSeconds", 30));
+                this._responseTimeoutSeconds = Math.Max(1, modelSetting.AgentSettings[SubAgentNames.ChatAgent].Config.GetConfigValueOrDefault("ResponseTimeoutSeconds", 30));
 
                 IAgent inputAgent = this._serviceProvider.GetRequiredKeyedService<IAgent>(SubAgentNames.InputAgent);
                 IAgent intentDetectionAgent = this._serviceProvider.GetRequiredKeyedService<IAgent>(SubAgentNames.IntentDetectionAgent);
@@ -157,7 +155,7 @@ namespace Agent.Telephone.Providers.LLM
             base.UnregisterDevice(activeCall);
         }
 
-        public async Task StartDialogueAsync(string userMessage, CancellationToken token)
+        public async Task StartDialogueAsync(long turnId, string userMessage, CancellationToken token)
         {
             if (!this.CheckDeviceRegistered(this.CurrentCall.DeviceId))
             {
@@ -184,15 +182,17 @@ namespace Agent.Telephone.Providers.LLM
             {
                 string assistantMessage = await this.RunAndEmitWorkflowStreamingAsync(
                     this._dialogueWorkflow,
+                    turnId,
                     userMessage,
                     eventCallback,
                     timeoutCts.Token);
                 AppendMissingChatHistory(chatHistory, chatHistoryCount, userMessage, assistantMessage);
-                await eventCallback.OnCompletedAsync(CancellationToken.None);
+                await eventCallback.OnCompletedAsync(turnId, CancellationToken.None);
             }
             catch (OperationCanceledException) when (!token.IsCancellationRequested && timeoutCts.IsCancellationRequested)
             {
                 await eventCallback.OnFailedAsync(
+                    turnId,
                     new TimeoutException($"LLM response exceeded {this._responseTimeoutSeconds} seconds."),
                     CancellationToken.None);
                 this.Logger.LogWarning(
@@ -203,12 +203,12 @@ namespace Agent.Telephone.Providers.LLM
             }
             catch (OperationCanceledException)
             {
-                await eventCallback.OnCancelledAsync(CancellationToken.None);
+                await eventCallback.OnCancelledAsync(turnId, CancellationToken.None);
                 throw;
             }
             catch (Exception exception)
             {
-                await eventCallback.OnFailedAsync(exception, CancellationToken.None);
+                await eventCallback.OnFailedAsync(turnId, exception, CancellationToken.None);
                 throw;
             }
         }
@@ -226,6 +226,7 @@ namespace Agent.Telephone.Providers.LLM
 
         private async Task<string> RunAndEmitWorkflowStreamingAsync(
             Workflow dialogueWorkflow,
+            long turnId,
             string userMessage,
             ILlmEventCallback eventCallback,
             CancellationToken token)
@@ -253,9 +254,9 @@ namespace Agent.Telephone.Providers.LLM
                                 allSegments.Add(pendingSegment);
                                 if (segmentCount == 1)
                                 {
-                                    await eventCallback.OnBeforeFirstSegmentAsync(pendingSegment, token);
+                                    await eventCallback.OnBeforeFirstSegmentAsync(turnId, pendingSegment, token);
                                 }
-                                await eventCallback.OnSegmentAsync(pendingSegment, token);
+                                await eventCallback.OnSegmentAsync(turnId, pendingSegment, token);
                             }
 
                             OutSegment segment = this._outSegmentPool.Get();
@@ -278,9 +279,9 @@ namespace Agent.Telephone.Providers.LLM
                     allSegments.Add(pendingSegment);
                     if (segmentCount == 1)
                     {
-                        await eventCallback.OnBeforeFirstSegmentAsync(pendingSegment, token);
+                        await eventCallback.OnBeforeFirstSegmentAsync(turnId, pendingSegment, token);
                     }
-                    await eventCallback.OnSegmentAsync(pendingSegment, token);
+                    await eventCallback.OnSegmentAsync(turnId, pendingSegment, token);
                 }
 
                 return string.Concat(allSegments.Select(segment => segment.Content));

@@ -10,7 +10,8 @@ namespace Agent.Telephone.Sample.Server.FunctionTools
 {
     public class CodexAssistant : PrivateFunctionTool
     {
-        private const string CodexExecutablePathEnvironmentVariable = "CODEX_CLI_PATH";
+        private const string CODEX_PATH = "D:\\nodejs\\node_global\\codex.cmd"; // codex cli 路径替换为你真实的路径
+        private const string CODEX_EXECUTABLE_PATH_ENVIRONMENT_VARIABLE = "CODEX_CLI_PATH";
 
         [Description("将用户已经说明清楚的任务交给 Codex CLI 执行。任务可能耗时，用户可以挂断电话，完成后系统会回拨或留下留言。不要用于普通闲聊、简单问答或需要在执行中向用户确认的操作。")]
         [ToolBehavior(ToolAction.Continue)]
@@ -21,10 +22,10 @@ namespace Agent.Telephone.Sample.Server.FunctionTools
                 return CreateResponse("没有收到可执行的任务，请用户重新说明需要 Codex 完成什么。");
             }
 
-            string? executablePath = Environment.GetEnvironmentVariable(CodexExecutablePathEnvironmentVariable);
+            string? executablePath = Environment.GetEnvironmentVariable(CODEX_EXECUTABLE_PATH_ENVIRONMENT_VARIABLE);
             if (string.IsNullOrWhiteSpace(executablePath))
             {
-                executablePath = "codex";
+                executablePath = CODEX_PATH;
             }
 
             var startInfo = new ProcessStartInfo
@@ -44,9 +45,9 @@ namespace Agent.Telephone.Sample.Server.FunctionTools
             {
                 process.Start();
             }
-            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+            catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
             {
-                this.Logger.LogError(exception, "无法启动 Codex CLI。请检查 {EnvironmentVariable} 或 PATH。", CodexExecutablePathEnvironmentVariable);
+                this.Logger.LogError(exception, "无法启动 Codex CLI。请检查 {EnvironmentVariable} 或 PATH。", CODEX_EXECUTABLE_PATH_ENVIRONMENT_VARIABLE);
                 return CreateResponse("无法启动 Codex CLI。请确认运行电话服务的账户已安装并登录 Codex CLI。");
             }
 

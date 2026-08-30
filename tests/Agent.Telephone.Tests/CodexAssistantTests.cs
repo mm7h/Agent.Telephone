@@ -39,4 +39,5 @@ public sealed class CodexAssistantTests
             s_environmentLock.Release();
         }
     }
+
 }

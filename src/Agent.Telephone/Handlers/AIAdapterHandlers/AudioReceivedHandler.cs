@@ -115,7 +115,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         public void OnVoiceDetected(float[] audioData)
         {
             this.ActiveCallContext.DeviceContext.AudioInPacket.ResetAudioBuffer();
-            if (this.HandlerToken.IsCancellationRequested)
+            if (this.ActiveCallContext.IsUserAudioInputPaused || this.HandlerToken.IsCancellationRequested)
             {
                 return;
             }

@@ -11,6 +11,9 @@ namespace Agent.Telephone.Common.Contexts
 {
     internal sealed class ActiveCallContext : IDisposable
     {
+        // G.711 电话 RTP 保持小帧，以满足实时性并避免超出底层 UDP 接收缓冲区。
+        private const int MinimumPacketTimeMs = 10;
+        private const int MaximumPacketTimeMs = 60;
         private readonly string _userAor;
         private readonly CancellationTokenSource _callCts = new();
         private readonly CancellationToken _callToken;
@@ -27,6 +30,7 @@ namespace Agent.Telephone.Common.Contexts
         private bool _assistantSwitching;
         private int _agentMediaPaused;
         private int _userAudioInputPaused;
+        private long _hangupAfterReplyTurnId = -1;
         private TaskCompletionSource<bool>? _promptPlaybackCompletion;
 
         public ActiveCallContext(SIPTransport sipTransport, SIPRequest sipRequest, DeviceContext deviceContext)
@@ -104,6 +108,52 @@ namespace Agent.Telephone.Common.Contexts
         public void ResumeAgentMedia() => Interlocked.Exchange(ref this._agentMediaPaused, 0);
         public void PauseUserAudioInput() => Interlocked.Exchange(ref this._userAudioInputPaused, 1);
         public void ResumeUserAudioInput() => Interlocked.Exchange(ref this._userAudioInputPaused, 0);
+
+        public bool TryBeginHangupAfterReply()
+        {
+            lock (this._turnLock)
+            {
+                if (this._callCts.IsCancellationRequested || this._hangupAfterReplyTurnId >= 0)
+                {
+                    return false;
+                }
+
+                this._hangupAfterReplyTurnId = this._turnId;
+            }
+
+            this.PauseUserAudioInput();
+            return true;
+        }
+
+        public bool IsHangupAfterReplyPending(long turnId)
+        {
+            lock (this._turnLock)
+            {
+                return this._hangupAfterReplyTurnId == turnId;
+            }
+        }
+
+        public bool CompleteHangupAfterReply(long turnId)
+        {
+            lock (this._turnLock)
+            {
+                if (this._hangupAfterReplyTurnId != turnId)
+                {
+                    return false;
+                }
+
+                this._hangupAfterReplyTurnId = -1;
+            }
+
+            if (!this.UserAgent.IsCallActive)
+            {
+                return false;
+            }
+
+            this.MarkEnding();
+            this.UserAgent.Hangup();
+            return true;
+        }
 
         public Task<bool> BeginPromptPlayback()
         {
@@ -322,16 +372,24 @@ namespace Agent.Telephone.Common.Contexts
             int? maxPtime = GetIntegerAttribute(audio?.ExtraMediaAttributes, "maxptime")
                 ?? GetIntegerAttribute(sdp?.ExtraSessionAttributes, "maxptime");
 
-            int packetTimeMs = ptime ?? AudioProcessSettings.DefaultPacketTimeMs;
+            int packetTimeMs = IsSupportedPacketTime(ptime)
+                ? ptime!.Value
+                : AudioProcessSettings.DefaultPacketTimeMs;
 
             // maxptime 仅表示上限，不是建议采用的包时长。
-            if (maxPtime is int max && packetTimeMs > max)
+            if (IsSupportedPacketTime(maxPtime) && packetTimeMs > maxPtime!.Value)
             {
-                packetTimeMs = max;
+                packetTimeMs = maxPtime!.Value;
             }
             this.PacketTimeMs = packetTimeMs;
-            this.MaxPacketTimeMs = maxPtime ?? packetTimeMs;
+            this.MaxPacketTimeMs = IsSupportedPacketTime(maxPtime)
+                ? maxPtime!.Value
+                : packetTimeMs;
         }
+
+        private static bool IsSupportedPacketTime(int? packetTimeMs) =>
+            packetTimeMs is >= MinimumPacketTimeMs and <= MaximumPacketTimeMs;
+
         private static int? GetIntegerAttribute(IEnumerable<string>? attributes, string name)
         {
             string prefix = $"a={name}:";
@@ -438,6 +496,11 @@ namespace Agent.Telephone.Common.Contexts
 
         private void EndCallTransport()
         {
+            lock (this._turnLock)
+            {
+                this._hangupAfterReplyTurnId = -1;
+            }
+
             lock (this._lifetimeLock)
             {
                 if (this._callEnded)

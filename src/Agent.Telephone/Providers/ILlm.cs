@@ -9,6 +9,6 @@ namespace Agent.Telephone.Providers
         bool Build(LLMBuildConfig settings);
         void RegisterDevice(ActiveCallContext activeCall, ILlmEventCallback callback);
         void UnregisterDevice(ActiveCallContext activeCall);
-        Task StartDialogueAsync(string userMessage, CancellationToken token);
+        Task StartDialogueAsync(long turnId, string userMessage, CancellationToken token);
     }
 }

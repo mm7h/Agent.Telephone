@@ -43,6 +43,29 @@ public sealed class SipRegistrarInboundTests
     }
 
     [Fact]
+    public void InboundCall_FallsBackToDefaultPacketTimeWhenSdpPtimeIsTooLarge()
+    {
+        using SIPTransport transport = new();
+        SIPRequest register = CreateRegisterRequest("sip:1001@192.0.2.10:5060", 300, 300);
+        using var device = new DeviceContext(
+            transport,
+            register,
+            SIPURI.ParseSIPURI("sip:1001@192.0.2.10:5060"),
+            300,
+            CreateConfig().AssistantConfigs);
+        SIPRequest invite = CreateInviteRequest(ASSISTANT_NUMBER, "0");
+        invite.Body += "a=ptime:1000\r\n";
+        invite.Header.ContentLength = invite.Body.Length;
+
+        Assert.True(device.TryInitializeCallSession(invite, out ActiveCallContext? activeCall));
+        Assert.NotNull(activeCall);
+        Assert.Equal(AudioProcessSettings.DefaultPacketTimeMs, activeCall.PacketTimeMs);
+        Assert.Equal(AudioProcessSettings.DefaultPacketTimeMs, activeCall.MaxPacketTimeMs);
+
+        device.CloseCallSession(activeCall);
+    }
+
+    [Fact]
     public async Task RegistrationRefreshUnregisterAndExpiryUpdateStatesAsync()
     {
         using SIPTransport transport = new();

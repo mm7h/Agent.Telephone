@@ -114,6 +114,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
 
             this.ActiveCallContext.CompletePromptPlayback(fullyPlayed: false);
+            this.ActiveCallContext.CompleteHangupAfterReply(workflow.TurnId);
         }
 
         private async Task MarkFinalPlaybackAsync(
@@ -125,7 +126,8 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 return;
             }
 
-            if (fullyPlayed && this.ActiveCallContext.IsPromptPlaybackPending)
+            bool hangupAfterReply = this.ActiveCallContext.IsHangupAfterReplyPending(workflow.TurnId);
+            if (fullyPlayed && (this.ActiveCallContext.IsPromptPlaybackPending || hangupAfterReply))
             {
                 try
                 {
@@ -140,6 +142,10 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
 
             this.ActiveCallContext.CompletePromptPlayback(fullyPlayed);
+            if (hangupAfterReply)
+            {
+                this.ActiveCallContext.CompleteHangupAfterReply(workflow.TurnId);
+            }
         }
 
         protected override void OnHandlerTokenChanged()

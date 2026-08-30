@@ -4,10 +4,10 @@ namespace Agent.Telephone.Providers.LLM
 {
     internal interface ILlmEventCallback
     {
-        Task OnBeforeFirstSegmentAsync(OutSegment firstSegment, CancellationToken cancellationToken);
-        Task OnSegmentAsync(OutSegment segment, CancellationToken cancellationToken);
-        Task OnCompletedAsync(CancellationToken cancellationToken);
-        Task OnCancelledAsync(CancellationToken cancellationToken);
-        Task OnFailedAsync(Exception exception, CancellationToken cancellationToken);
+        Task OnBeforeFirstSegmentAsync(long turnId, OutSegment firstSegment, CancellationToken cancellationToken);
+        Task OnSegmentAsync(long turnId, OutSegment segment, CancellationToken cancellationToken);
+        Task OnCompletedAsync(long turnId, CancellationToken cancellationToken);
+        Task OnCancelledAsync(long turnId, CancellationToken cancellationToken);
+        Task OnFailedAsync(long turnId, Exception exception, CancellationToken cancellationToken);
     }
 }

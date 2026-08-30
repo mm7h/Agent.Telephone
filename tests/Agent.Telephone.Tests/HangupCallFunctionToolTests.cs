@@ -10,7 +10,7 @@ namespace Agent.Telephone.Tests;
 public sealed class HangupCallFunctionToolTests
 {
     [Fact]
-    public void HangupCurrentCall_DelegatesToCallControl()
+    public void HangupCurrentCall_RequestsHangupAfterReply()
     {
         var callControl = new RecordingAssistantControl();
         var tool = new HangupCall
@@ -21,8 +21,11 @@ public sealed class HangupCallFunctionToolTests
 
         FunctionReturn<string> result = tool.HangupCurrentCall();
 
-        Assert.True(callControl.HangupRequested);
-        Assert.Equal(ToolAction.Silent, result.Next);
+        Assert.True(callControl.HangupAfterReplyRequested);
+        Assert.False(callControl.HangupRequested);
+        Assert.Equal(ToolAction.Continue, result.Next);
+        Assert.False(string.IsNullOrWhiteSpace(result.Result));
+        Assert.Equal(result.Result, result.Response);
     }
 
     private sealed class RecordingAssistantControl : IAssistantControl
@@ -31,6 +34,7 @@ public sealed class HangupCallFunctionToolTests
         public string? AssistantNumber => "10000";
         public bool IsCallActive => true;
         public bool HangupRequested { get; private set; }
+        public bool HangupAfterReplyRequested { get; private set; }
 
         public Task<AssistantSwitchResult> SwitchAssistantAsync(
             string targetAssistantNumber,
@@ -39,6 +43,11 @@ public sealed class HangupCallFunctionToolTests
         public void HangupCurrentCall()
         {
             this.HangupRequested = true;
+        }
+
+        public void HangupCurrentCallAfterReply()
+        {
+            this.HangupAfterReplyRequested = true;
         }
 
         public Task<DtmfInputResult> RequestDtmfInputAsync(

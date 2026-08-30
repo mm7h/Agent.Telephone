@@ -1,4 +1,5 @@
 ﻿using System.Threading.Channels;
+using System.Collections.Concurrent;
 using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
@@ -13,8 +14,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
     {
         private ILlm? _llm;
         private IOfflineDialogue? _offlineDialogue;
-        private OfflineDialogueTurn? _turn;
-        private int _terminal;
+        private readonly ConcurrentDictionary<long, DialogueTurnContext> _turnContexts = [];
 
         private readonly ObjectPool<Workflow<string>> _textWorkflowPool;
         private readonly ObjectPool<Workflow<OutSegment>> _segmentWorkflowPool;
@@ -89,43 +89,45 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
             using (lease)
             {
-                OfflineDialogueTurn? turn = null;
+                bool contextAdded = false;
                 try
                 {
-                    this._turn = null;
-                    Volatile.Write(ref this._terminal, 0);
-                    turn = await this._offlineDialogue.BeginTurnAsync(
+                    OfflineDialogueTurn turn = await this._offlineDialogue.BeginTurnAsync(
                         this.ActiveCallContext,
                         workflow.TurnId,
                         workflow.Data,
                         CancellationToken.None);
-                    this._turn = turn;
+                    contextAdded = this._turnContexts.TryAdd(workflow.TurnId, new DialogueTurnContext(turn));
+                    if (!contextAdded)
+                    {
+                        throw new InvalidOperationException($"Dialogue turn {workflow.TurnId} is already active.");
+                    }
 
                     //await Task.Delay(10 * 1000);
 
-                    await this._llm.StartDialogueAsync(workflow.Data, this.HandlerToken);
+                    await this._llm.StartDialogueAsync(workflow.TurnId, workflow.Data, this.HandlerToken);
                 }
                 catch (OperationCanceledException)
                 {
-                    if (turn is not null)
+                    if (contextAdded)
                     {
-                        await this.OnCancelledAsync(CancellationToken.None);
+                        await this.OnCancelledAsync(workflow.TurnId, CancellationToken.None);
                     }
                     this.Logger.LogDebug("LLM 对话已取消，设备 {DeviceId}", this.ActiveCallContext.DeviceId);
                 }
                 catch (Exception exception)
                 {
-                    if (turn is not null)
+                    if (contextAdded)
                     {
-                        await this.OnFailedAsync(exception, CancellationToken.None);
+                        await this.OnFailedAsync(workflow.TurnId, exception, CancellationToken.None);
                     }
                     this.Logger.LogError(exception, "处理来自设备的 LLM 对话失败: {deviceId}。", this.ActiveCallContext.DeviceId);
                 }
                 finally
                 {
-                    if (ReferenceEquals(this._turn, turn))
+                    if (contextAdded)
                     {
-                        this._turn = null;
+                        this._turnContexts.TryRemove(workflow.TurnId, out _);
                     }
                     this.ActiveCallContext.DeviceContext.EndBackgroundReply();
                 }
@@ -151,11 +153,11 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
         }
 
-        private async Task QueueRealtimeSegmentAsync(OutSegment segment)
+        private async Task<bool> QueueRealtimeSegmentAsync(OutSegment segment)
         {
             if (this.ActiveCallContext.CallToken.IsCancellationRequested)
             {
-                return;
+                return false;
             }
 
             OutSegment clonedSegment = this._segmentPool.Get();
@@ -165,76 +167,40 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             try
             {
                 await this.NextWriter.WriteAsync(workflow, this.HandlerToken);
+                return true;
             }
             catch
             {
                 this._segmentPool.Return(clonedSegment);
                 this._segmentWorkflowPool.Return(workflow);
+                return false;
             }
         }
 
-        #region LLM Event Callback
-        public async Task OnBeforeFirstSegmentAsync(OutSegment firstSegment, CancellationToken cancellationToken)
+        private async Task<bool> QueueDeferredHangupSegmentAsync(DialogueTurnContext context)
         {
-            OfflineDialogueTurn turn = this.GetCurrentTurn();
-            await this.EnsureOfflinePersistenceAsync(turn, cancellationToken);
-        }
-
-        public async Task OnSegmentAsync(OutSegment segment, CancellationToken cancellationToken)
-        {
-            OfflineDialogueTurn turn = this.GetCurrentTurn();
-            await this.EnsureOfflinePersistenceAsync(turn, cancellationToken);
-            await this._offlineDialogue!.AppendAssistantSegmentAsync(turn, segment.Content, null, cancellationToken);
-            if (!turn.IsOfflineDelivery)
+            DeferredHangupSegment? deferredSegment = context.DeferredHangupSegment;
+            if (deferredSegment is null)
             {
-                await this.QueueRealtimeSegmentAsync(segment);
+                return false;
             }
-        }
 
-        public async Task OnCompletedAsync(CancellationToken cancellationToken)
-        {
-            OfflineDialogueTurn turn = this.GetCurrentTurn();
-            await this.EnsureOfflinePersistenceAsync(turn, cancellationToken);
-            if (!turn.IsOfflineDelivery &&
-                !this.ActiveCallContext.DeviceContext.TryRecordCompletedOnlineTurn(this.ActiveCallContext, turn))
+            OutSegment segment = this._segmentPool.Get();
+            segment.Initialize(
+                deferredSegment.Content,
+                isFirst: true,
+                isLast: true,
+                deferredSegment.ParagraphId,
+                deferredSegment.SentenceId);
+            try
             {
-                turn.IsOfflineDelivery = true;
-                await this._offlineDialogue!.BeginOfflinePersistenceAsync(turn, cancellationToken);
+                return await this.QueueRealtimeSegmentAsync(segment);
             }
-            bool completed = await this.FinishAsync(
-                turn,
-                token => this._offlineDialogue!.CompleteTurnAsync(
-                    turn,
-                    read: !turn.IsOfflineDelivery,
-                    token),
-                cancellationToken);
-            if (completed && turn.IsOfflineDelivery)
+            finally
             {
-                await this._offlineDialogue!.StartProactiveCallAsync(this.ActiveCallContext.DeviceContext, turn);
+                this._segmentPool.Return(segment);
             }
         }
-
-        public async Task OnCancelledAsync(CancellationToken cancellationToken)
-        {
-            OfflineDialogueTurn turn = this.GetCurrentTurn();
-            await this.FinishAsync(
-                turn,
-                token => this._offlineDialogue!.DiscardTurnAsync(turn, token),
-                cancellationToken);
-        }
-
-        public async Task OnFailedAsync(Exception exception, CancellationToken cancellationToken)
-        {
-            OfflineDialogueTurn turn = this.GetCurrentTurn();
-            await this.FinishAsync(
-                turn,
-                token => this._offlineDialogue!.FailTurnAsync(turn, token),
-                cancellationToken);
-        }
-        #endregion
-
-        private OfflineDialogueTurn GetCurrentTurn() => this._turn
-            ?? throw new InvalidOperationException("The LLM response sink has no active dialogue turn.");
 
         private async Task EnsureOfflinePersistenceAsync(OfflineDialogueTurn turn, CancellationToken cancellationToken)
         {
@@ -252,12 +218,103 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             await this._offlineDialogue!.BeginOfflinePersistenceAsync(turn, cancellationToken);
         }
 
+        #region LLM Event Callback
+        public async Task OnBeforeFirstSegmentAsync(long turnId, OutSegment firstSegment, CancellationToken cancellationToken)
+        {
+            DialogueTurnContext context = this.GetTurnContext(turnId);
+            await this.EnsureOfflinePersistenceAsync(context.Turn, cancellationToken);
+        }
+
+        public async Task OnSegmentAsync(long turnId, OutSegment segment, CancellationToken cancellationToken)
+        {
+            DialogueTurnContext context = this.GetTurnContext(turnId);
+            OfflineDialogueTurn turn = context.Turn;
+            await this.EnsureOfflinePersistenceAsync(turn, cancellationToken);
+            await this._offlineDialogue!.AppendAssistantSegmentAsync(turn, segment.Content, null, cancellationToken);
+            if (this.ActiveCallContext.IsHangupAfterReplyPending(turnId))
+            {
+                context.CaptureDeferredHangupSegment(segment);
+                return;
+            }
+
+            if (!turn.IsOfflineDelivery)
+            {
+                if (await this.QueueRealtimeSegmentAsync(segment))
+                {
+                    Interlocked.Exchange(ref context.HasRealtimeSegment, 1);
+                }
+            }
+        }
+
+        public async Task OnCompletedAsync(long turnId, CancellationToken cancellationToken)
+        {
+            DialogueTurnContext context = this.GetTurnContext(turnId);
+            OfflineDialogueTurn turn = context.Turn;
+            await this.EnsureOfflinePersistenceAsync(turn, cancellationToken);
+            if (!turn.IsOfflineDelivery &&
+                !this.ActiveCallContext.DeviceContext.TryRecordCompletedOnlineTurn(this.ActiveCallContext, turn))
+            {
+                turn.IsOfflineDelivery = true;
+                await this._offlineDialogue!.BeginOfflinePersistenceAsync(turn, cancellationToken);
+            }
+            if (!turn.IsOfflineDelivery &&
+                this.ActiveCallContext.IsHangupAfterReplyPending(turnId) &&
+                await this.QueueDeferredHangupSegmentAsync(context))
+            {
+                Interlocked.Exchange(ref context.HasRealtimeSegment, 1);
+            }
+
+            bool completed = await this.FinishAsync(
+                context,
+                token => this._offlineDialogue!.CompleteTurnAsync(
+                    turn,
+                    read: !turn.IsOfflineDelivery,
+                    token),
+                cancellationToken);
+            if (Volatile.Read(ref context.HasRealtimeSegment) == 0)
+            {
+                this.ActiveCallContext.CompleteHangupAfterReply(turnId);
+            }
+            if (completed && turn.IsOfflineDelivery)
+            {
+                await this._offlineDialogue!.StartProactiveCallAsync(this.ActiveCallContext.DeviceContext, turn);
+            }
+        }
+
+        public async Task OnCancelledAsync(long turnId, CancellationToken cancellationToken)
+        {
+            DialogueTurnContext context = this.GetTurnContext(turnId);
+            this.ActiveCallContext.CompleteHangupAfterReply(turnId);
+            await this.FinishAsync(
+                context,
+                token => this._offlineDialogue!.DiscardTurnAsync(context.Turn, token),
+                cancellationToken);
+        }
+
+        public async Task OnFailedAsync(long turnId, Exception exception, CancellationToken cancellationToken)
+        {
+            DialogueTurnContext context = this.GetTurnContext(turnId);
+            this.ActiveCallContext.CompleteHangupAfterReply(turnId);
+            await this.FinishAsync(
+                context,
+                token => this._offlineDialogue!.FailTurnAsync(context.Turn, token),
+                cancellationToken);
+        }
+        #endregion
+
+        private DialogueTurnContext GetTurnContext(long turnId)
+        {
+            return this._turnContexts.TryGetValue(turnId, out DialogueTurnContext? context)
+                ? context
+                : throw new InvalidOperationException($"The LLM response sink has no active dialogue turn {turnId}.");
+        }
+
         private async Task<bool> FinishAsync(
-            OfflineDialogueTurn turn,
+            DialogueTurnContext context,
             Func<CancellationToken, ValueTask> finishAsync,
             CancellationToken cancellationToken)
         {
-            if (Interlocked.Exchange(ref this._terminal, 1) != 0)
+            if (Interlocked.Exchange(ref context.Terminal, 1) != 0)
             {
                 return false;
             }
@@ -265,15 +322,45 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             try
             {
                 await finishAsync(cancellationToken);
-                await this._offlineDialogue!.FlushTurnAsync(turn, CancellationToken.None);
+                await this._offlineDialogue!.FlushTurnAsync(context.Turn, CancellationToken.None);
                 return true;
             }
             catch (Exception exception)
             {
-                this.Logger.LogError(exception, "结算 LLM Turn {TurnId} 的持久化状态失败。", turn.TurnId);
+                this.Logger.LogError(exception, "结算 LLM Turn {TurnId} 的持久化状态失败。", context.Turn.TurnId);
                 return false;
             }
         }
+
+        private sealed class DialogueTurnContext
+        {
+            private DeferredHangupSegment? _deferredHangupSegment;
+
+            public DialogueTurnContext(OfflineDialogueTurn turn)
+            {
+                this.Turn = turn;
+            }
+
+            public OfflineDialogueTurn Turn { get; }
+            public DeferredHangupSegment? DeferredHangupSegment => Volatile.Read(ref this._deferredHangupSegment);
+            public int Terminal;
+            public int HasRealtimeSegment;
+
+            public void CaptureDeferredHangupSegment(OutSegment segment)
+            {
+                if (string.IsNullOrWhiteSpace(segment.Content))
+                {
+                    return;
+                }
+
+                Interlocked.CompareExchange(
+                    ref this._deferredHangupSegment,
+                    new DeferredHangupSegment(segment.Content, segment.ParagraphId, segment.SentenceId),
+                    null);
+            }
+        }
+
+        private sealed record DeferredHangupSegment(string Content, string? ParagraphId, string? SentenceId);
 
         public override void Dispose()
         {

@@ -78,20 +78,22 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 return;
             }
 
+            OutAudioSegment segment = workflow.Data;
             try
             {
                 this.HandlerToken.ThrowIfCancellationRequested();
-                OutAudioSegment segment = workflow.Data;
                 AudioFormat format = this.ActiveCallContext.NegotiatedAudioFormat;
                 if (format.IsEmpty())
                 {
                     this.Logger.LogWarning("设备 {deviceId} 尚未协商 RTP 音频格式，暂不处理混音音频。", this.ActiveCallContext.DeviceId);
+                    this.CompleteHangupAfterReplyOnTerminalSegment(workflow);
                     return;
                 }
 
                 if (this.ActiveCallContext.PacketTimeMs <= 0)
                 {
                     this.Logger.LogWarning("设备 {deviceId} 的 RTP ptime 无效，暂不处理混音音频。", this.ActiveCallContext.DeviceId);
+                    this.CompleteHangupAfterReplyOnTerminalSegment(workflow);
                     return;
                 }
 
@@ -106,6 +108,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                         format.Codec,
                         format.ClockRate,
                         this.ActiveCallContext.PacketTimeMs);
+                    this.CompleteHangupAfterReplyOnTerminalSegment(workflow);
                     return;
                 }
 
@@ -130,11 +133,21 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
             catch (OperationCanceledException)
             {
+                this.CompleteHangupAfterReplyOnTerminalSegment(workflow);
                 this.Logger.LogDebug("设备 {deviceId} 的混音输入已取消。", this.ActiveCallContext.DeviceId);
             }
             catch (Exception exception)
             {
+                this.CompleteHangupAfterReplyOnTerminalSegment(workflow);
                 this.Logger.LogError(exception, "设备 {deviceId} 的混音输入失败。", this.ActiveCallContext.DeviceId);
+            }
+        }
+
+        private void CompleteHangupAfterReplyOnTerminalSegment(Workflow<OutAudioSegment> workflow)
+        {
+            if (workflow.Data.IsLastSegment)
+            {
+                this.ActiveCallContext.CompleteHangupAfterReply(workflow.TurnId);
             }
         }
 
