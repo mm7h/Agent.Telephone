@@ -37,7 +37,7 @@
 
 - SIP 网关设备
 
-网关设备推荐单网口社保，例如 **潮流网络 HT701**，闲鱼和拼多多就可以淘到。
+网关设备推荐单网口设备，例如 **潮流网络 HT701**，闲鱼和拼多多就可以淘到。
 
 <img src="./docs/assets/HT701.jpg" width="350" height="233" />
 <img src="./docs/assets/HT701_no skin.jpg" width="300" height="400" />
