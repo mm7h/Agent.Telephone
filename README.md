@@ -157,10 +157,10 @@ dotnet run
 | 📲 回拨与离线留言 | 用户提前挂断后不影响 LLM 继续生成回复。<br/>在 LLM 完全生成回复后如果用户没有保持通话，则随后会尝试回拨。<br/>用户长时间未接听，则投递失败并保存为未读电话留言，下次拨相同号码接通后，会提示离线留言。 |
 | 💾 可扩展持久化 | 通过 `ITelephoneStore` 接口持久化注册、对话、消息分段与投递状态；示例提供 SQLite 实现。 |
 | 🔊 多媒体音频 | 使用 FFmpeg 解码、重采样、混音与编码，并提供内置号码、等待音和错误提示音。 |
-| 🛠️ 可替换模型组件 | VAD、ASR、LLM、TTS 与 Intent 均按统一 Provider 接口组织，可按配置选择实现。 |
+| 🛠️ 可配置模型能力 | VAD、ASR、LLM、TTS 与 Intent 均可通过配置选择已有实现。 |
 | 💻 Codex 任务助理 | 示例号码 `10088` 可调用独立 Codex CLI 执行非交互任务；该能力为可选示例。|
 
-> 🎯 Assistant 切换不是重新建立电话。系统会保留原有 SIP dialogue、媒体会话与设备身份，只替换当前 Agent 会话。
+> 🎯 Assistant 切换不是重新建立电话。系统会保留原有 SIP dialogue、媒体会话与设备身份，只切换当前 Assistant 的配置与能力。
 
 ## 已接入的平台 / 模型 📋
 
@@ -207,7 +207,7 @@ flowchart LR
 
 一次普通对话会依次经过：
 
-`SIP/RTP → AudioReceivedHandler → Audio2TextHandler → DialogueHandler → Text2AudioHandler → AudioSendHandler → RTP`
+`SIP/RTP → 解码与 VAD → ASR → LLM / Function Tool → TTS → 混音与编码 → RTP`
 
 详细设计见 [系统架构与音频流水线](docs/03-系统架构与音频流水线.md)。
 

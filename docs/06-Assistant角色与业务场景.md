@@ -1,8 +1,10 @@
 # 🎭 Assistant 角色与业务场景
 
-本文说明示例宿主中 `AssistantConfigs` 的角色设计，以及角色切换、回拨、离线留言和按键交互在电话链路中的实际行为。配置字段的完整说明见 [02-配置文件参考](02-配置文件参考.md)，Function Tool 的编写方式见 [04-FunctionTool与按键交互扩展](04-FunctionTool与按键交互扩展.md)。
+本文说明示例宿主中 `AssistantConfigs` 的角色设计，以及角色切换、回拨、离线留言和按键交互在电话链路中的实际行为。
 
-> 本文以当前工作区的 `demo/Agent.Telephone.Sample.Server/configs/config.json` 和源码为准。`10088` 是可选的 Codex 非交互任务助理；它不提供电话审批、追问或主机写入能力。
+配置字段的完整说明见 [02-配置文件参考](02-配置文件参考.md)，Function Tool 的编写方式见 [04-FunctionTool与按键交互扩展](04-FunctionTool与按键交互扩展.md)。
+
+> 本文以当前工作区的 `demo/Agent.Telephone.Sample.Server/configs/config.json` 和源码为准。`10088` 是可选的 Codex 非交互任务助理电话号码；它不提供电话审批、追问或主机写入能力。
 
 ## 🧩 1. Assistant 的绑定方式
 
@@ -15,10 +17,12 @@
 AssistantConfig（Prompt、VAD、ASR、Intent、LLM、TTS、AllowedTools）
     │
     ▼
-本通电话的 AIAgentContext（Provider、Handler、Private Function Tool）
+本通电话使用所选模型能力、已授权工具与 Assistant Prompt
 ```
 
-号码不是展示名称：呼入 INVITE 的被叫号码必须匹配某个 `AssistantConfig.DialingNumber`。接通后，当前通话会持有该配置及对应的 `AIAgentContext`；同一个设备同一时刻只允许一个活动通话。`HelloMessageTempletes` 中会随机选取一条作为首次问候的文本来源。
+号码不是展示名称：呼入的被叫号码必须匹配某个 `AssistantConfig.DialingNumber`。
+
+接通后，当前通话从 `HelloMessageTempletes` 中会随机选取一条作为首次问候的文本来源。
 
 `AllowedTools` 是角色权限边界，而不是提示词中的建议。工具已注册但名称不在当前 Assistant 的 `AllowedTools` 中时，不会作为该角色的可用工具构建。提示词仍应只描述被允许的能力，避免模型尝试调用未授权工具。
 
@@ -31,7 +35,7 @@ AssistantConfig（Prompt、VAD、ASR、Intent、LLM、TTS、AllowedTools）
 |`10085`|写作与语言助理|`IntentLlm`|`HangupCurrentCall`|起草、润色、改写、翻译与表达优化。当前提示词强调短句、适合电话收听。|
 |`10088`|Codex 任务助理|`FunctionCall`|`RunCodexTaskAsync`、`HangupCurrentCall`|在受控主机上执行明确、只读且非交互的 Codex 任务；可能耗时较长。|
 
-前台的 `AssistantPrompts/10000.md` 只允许将通话转往 `10086` 或 `10085`。这是一份产品路由规则，不会替代运行时校验；`AssistantRoleControl` 仍会核对目标号码存在、不是当前角色、通话未结束且没有并发切换。
+前台的 `AssistantPrompts/10000.md` 只允许将通话转往 `10086` 或 `10085`。这是一份产品路由规则，不会替代 SDK 校验；切换请求仍需满足目标号码存在、不是当前角色、通话未结束且没有并发切换。
 
 ### 2.1 直接拨打与前台路由
 
@@ -50,9 +54,9 @@ AssistantConfig（Prompt、VAD、ASR、Intent、LLM、TTS、AllowedTools）
 
 ![同一 SIP 通话内的 Assistant 角色切换](assets/assistant-switch-lifecycle.png)
 
-> 🧭 图中蓝色连线表示持续存在的电话通话，琥珀色表示切换期间的等待/回铃，青绿色表示新角色成功就绪；下方 Mermaid 时序图描述准确执行顺序。
+> 🧭 图中蓝色连线表示持续存在的电话通话，琥珀色表示切换期间的等待/回铃，青绿色表示新角色成功就绪；下方流程描述开发者可观察的业务行为。
 
-“转接”在本项目中不是新建一通 SIP 电话。它保留现有的 SIP dialogue、`SIPUserAgent`、`VoIPMediaSession`、协商得到的音频格式和 RTP 会话；变化的只有 Assistant 配置及其 `AIAgentContext`（Provider、Handler、Private Function Tool）。因此用户不会收到第二次来电，也不需要重新接听。
+“转接”在本项目中不是新建一通 SIP 电话。它保留现有电话连接、设备身份和已协商的音频会话，只切换当前 Assistant 的配置与能力。因此用户不会收到第二次来电，也不需要重新接听。
 
 ### 3.1 切换时序
 
@@ -60,15 +64,15 @@ AssistantConfig（Prompt、VAD、ASR、Intent、LLM、TTS、AllowedTools）
 前台工具调用 SwitchAssistantAsync(target)
   │
   ├─ 校验目标：非空 / 存在 / 不是当前号码 / 通话仍在
-  ├─ 取得本通话的独占切换权；暂停 Agent 媒体并取消当前 Turn
+  ├─ 取得本通话的独占切换权；暂停当前回复并取消当前 Turn
   ├─ 启动 180.mp3 循环回铃
-  ├─ 释放旧 AIAgentContext，替换为目标号码的新 AIAgentContext
-  ├─ 构建：Function Tool → Provider → Handler
+  ├─ 停用旧角色的会话能力
+  ├─ 初始化目标角色所需的模型与已授权工具
   ├─ 停止回铃
-  └─ 恢复 Agent 媒体，播放目标角色首次问候并标记通话已连接
+  └─ 恢复通话音频，播放目标角色首次问候并标记通话已连接
 ```
 
-工具立刻获得的 `Accepted` 仅表示后台切换请求已被接受，不等同于目标 Pipeline 已经构建成功。`AssistantSwitchResult` 的其他可观察状态包括：
+工具立刻获得的 `Accepted` 仅表示后台切换请求已被接受，不等同于目标 Assistant 已经就绪。`AssistantSwitchResult` 的其他可观察状态包括：
 
 |状态|含义|工具或提示词应如何处理|
 |---|---|---|
@@ -80,18 +84,18 @@ AssistantConfig（Prompt、VAD、ASR、Intent、LLM、TTS、AllowedTools）
 
 ### 3.2 回铃、失败与资源释放
 
-开始切换时会暂停 Agent 媒体并重启当前 Turn，避免旧角色的流式文本或 TTS 音频和新角色输出交错。系统在构建阶段循环播放嵌入式 `error_feedback/180.mp3`；无论成功、异常还是通话挂断，都会取消并等待该播放任务结束。
+开始切换时会暂停当前回复并取消当前 Turn，避免旧角色的流式文本或 TTS 音频和新角色输出交错。目标角色初始化期间，系统循环播放嵌入式 `error_feedback/180.mp3`；无论成功、异常还是通话挂断，都会取消并等待该播放任务结束。
 
 切换失败有两条不同路径：
 
-- 如果旧 Agent 尚未替换（例如换前校验或替换动作失败），系统恢复旧会话的 Agent 媒体，用户可继续与原角色通话。
-- 如果旧会话已替换但新 Pipeline 构建失败，旧资源已经释放，无法安全恢复。系统停止回铃、播放 `error_feedback/480.mp3`，然后挂断当前电话，避免留下半初始化角色。
+- 如果原角色仍然可用，系统会恢复原会话的音频，用户可继续与原角色通话。
+- 如果目标角色初始化失败且原角色已无法安全恢复，系统停止回铃、播放 `error_feedback/480.mp3`，然后挂断当前电话。
 
-因此，新增角色所依赖的模型、工具或外部服务应在上线前单独验证。不要在 Function Tool 内直接操作 SIP/RTP 对象；工具通过 `IAssistantControl` 和 `AssistantControlAdapter` 请求切换，底层控制仍由 Provider 负责。
+因此，新增角色所依赖的模型、工具或外部服务应在上线前单独验证。不要在 Function Tool 内直接操作 SDK 的 SIP/RTP 内部对象；应只通过公开的 `IAssistantControl` 请求切换。
 
 ## 📬 4. 在线对话、挂断后的回拨与离线留言
 
-每次用户语句对应一个 Turn。在线时，LLM 的文本片段继续送往 TTS/RTP；已完成的在线 Turn 先由当前 Agent 会话保留，并在通话关闭时以 `Read` 状态持久化。若用户在回复生成期间挂断，生成不必立即停止：系统将此 Turn 标为离线投递，立即持久化已生成和后续生成的文本片段，并在完成后尝试主动回拨。
+每次用户语句对应一个 Turn。在线时，LLM 的文本片段继续送往 TTS/RTP；已完成的在线 Turn 会在通话关闭时以 `Read` 状态持久化。若用户在回复生成期间挂断，生成不必立即停止：系统将此 Turn 标为离线投递，立即持久化已生成和后续生成的文本片段，并在完成后尝试主动回拨。
 
 ```text
 用户说话 → LLM 流式生成
@@ -104,7 +108,7 @@ AssistantConfig（Prompt、VAD、ASR、Intent、LLM、TTS、AllowedTools）
                                   └─ 未接听/无法回拨：保留为未读留言
 ```
 
-回拨使用设备最近一次有效 SIP `Contact`；拨号超时使用 `SIPConfig.CallbackTimeoutSeconds`。设备进入回拨占用状态后，新的呼入不会与该回拨争用同一设备。回拨已接通时，系统重新构建当前 Assistant 的 Function Tool、Provider 和回拨 Handler，再按片段播放留言；消息播放完成后才标记为已读。
+回拨使用设备最近一次有效 SIP `Contact`；拨号超时使用 `SIPConfig.CallbackTimeoutSeconds`。设备进入回拨占用状态后，新的呼入不会与该回拨争用同一设备。回拨接通后，系统按片段播放留言；消息播放完成后才标记为已读。
 
 下次该用户拨打**同一个 Assistant 号码**时，系统按 `UserAor + AssistantNumber` 查找未读助手消息：
 
@@ -151,3 +155,6 @@ DTMF 输入有两类用途：
 |直拨 `10088`|已登录 CLI 收到一个明确的只读任务；用户挂断后完成结果会回拨或成为未读留言。|
 |带未读留言的再次呼入|先出现 `1`/`2` 菜单；播放完才标已读，跳过则按 `2` 批量标已读。|
 |DTMF 超时、挂机、抢话或切换|交互任务返回非成功状态，不把动作当作已确认。|
+
+上一篇：[05-持久化、回拨与离线留言.md](05-持久化、回拨与离线留言.md)<br />
+下一篇：[07-故障排查与运维.md](07-故障排查与运维.md)

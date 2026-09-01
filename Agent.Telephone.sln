@@ -50,6 +50,16 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Agent.Telephone.Media", "sr
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Agent.Telephone.Media.Resource", "src\media\Agent.Telephone.Media.Resource\Agent.Telephone.Media.Resource.csproj", "{A5C10347-68C9-44E7-9B68-42B322C306A4}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "assets", "assets", "{330A827E-04C5-4D38-802E-5034C9257B53}"
+	ProjectSection(SolutionItems) = preProject
+		docs\assets\assistant-switch-lifecycle.png = docs\assets\assistant-switch-lifecycle.png
+		docs\assets\HT701.jpg = docs\assets\HT701.jpg
+		docs\assets\HT701_no skin.jpg = docs\assets\HT701_no skin.jpg
+		docs\assets\logo.png = docs\assets\logo.png
+		docs\assets\telephone-ai-overview.png = docs\assets\telephone-ai-overview.png
+		docs\assets\telephone.png = docs\assets\telephone.png
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -158,6 +168,7 @@ Global
 		{BEE8551D-2FEE-37B8-C7DC-2A9A67B7B406} = {9D99767B-53E4-4EDF-816E-2D8AD157CBC3}
 		{C1A6314C-816B-DAA1-DE92-CEAB6CEBEFA3} = {9D99767B-53E4-4EDF-816E-2D8AD157CBC3}
 		{A5C10347-68C9-44E7-9B68-42B322C306A4} = {9D99767B-53E4-4EDF-816E-2D8AD157CBC3}
+		{330A827E-04C5-4D38-802E-5034C9257B53} = {B3E4F594-7932-4719-B62B-85377D419E97}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {BE4A8163-E230-4307-9BCA-2ED76AFCFC3A}

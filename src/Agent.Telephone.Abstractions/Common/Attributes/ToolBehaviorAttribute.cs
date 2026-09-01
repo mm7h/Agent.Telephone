@@ -23,13 +23,6 @@ namespace Agent.Telephone.Abstractions.Common.Attributes
         public ToolAction DefaultAction { get; set; } = ToolAction.Continue;
 
         /// <summary>
-        /// todo
-        /// 是否允许该函数被意图识别模块调用。
-        /// 默认为 true，表示允许；如果设置为 false，则该函数只能被显式调用，意图识别模块不会将其作为候选工具。
-        /// </summary>
-        public bool AllowIntentDetection { get; set; } = true;
-
-        /// <summary>
         /// 从当前活动的双音多频（DTMF）菜单中选择此功能的按键。
         /// 多个键可以使用按位或运算符进行组合。
         /// </summary>
