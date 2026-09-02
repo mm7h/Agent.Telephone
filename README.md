@@ -1,20 +1,18 @@
 <div align="center">
 <img src="./docs/assets/logo.png" alt="Agent.Telephone：让传统电话接入 AI" width="100" height="100" />
 
-### Agent Telephone ☎️
+# Agent Telephone
 
 [![.NET](https://img.shields.io/badge/.NET-8.0-7355dd?logo=dotnet)](https://dotnet.microsoft.com/)
+[![Issues](https://img.shields.io/github/issues/mm7h/Agent.Telephone)](https://github.com/mm7h/Agent.Telephone/issues)
 [![License](https://img.shields.io/github/license/mm7h/Agent.Telephone)](./LICENSE)
 
 </div>
 
 
+☎️ **Agent.Telephone** 是一个使用 `.NET 8` 开发的电话语音 Agent 服务 SDK。
 
-（中文 | [English](./README_en.md)）
-
-**Agent.Telephone** 是一个使用 `.NET 8` 开发的电话语音 Agent 服务 SDK。
-
-它通过 **SIP 模拟电话网关**，把普通座机通过 SIP/RTP 通话接入 **大模型** 语音通话。
+它通过 **SIP 模拟电话网关**，把普通座机通过 SIP/RTP 通话接入 **大模型** 角色扮演和语音通话。
 
 ## 文档导航 📚
 
@@ -54,7 +52,7 @@
 ### 二、电话网关配置 📞
 
 参照 [SIP网关说明书](https://www.manuallib.com/download/pdf16/GRANDSTREAM-TECHNOLOGY-HT701-ANALOG-TELEPHONE-ADAPTER-1.0.0.17-USER-MANUAL.PDF)，进入到设备后台进行配置。
-> [!TIPS]
+> [!TIP]
 > 步骤1：使用模拟电话，拨打“***”进入IVR语音菜单。输入“02”获取HT701当前的IP地址。<br/>
 > 步骤2：在网页浏览器的地址栏中输入获取到的IP地址，进入登录页面。<br/>
 > 步骤3：输入密码“admin”登录设备，进行配置。
