@@ -11,6 +11,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 {
     internal sealed class AudioReceivedHandler : BaseHandler, IInAIAdapterHandler<byte[]>, IOutAIAdapterHandler<float[]>, IVadEventCallback
     {
+        private const int MinimumSpeechDurationMilliseconds = 500;
 
         private IAudioProcessor? _audioProcessor;
         private IVad? _vad;
@@ -75,6 +76,11 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 return;
             }
 
+            if (this.ActiveCallContext.IsUserAudioProcessing)
+            {
+                return;
+            }
+
 
             if (this._vad is null)
             {
@@ -114,36 +120,46 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
         public void OnVoiceDetected(float[] audioData)
         {
-            this.ActiveCallContext.DeviceContext.AudioInPacket.ResetAudioBuffer();
-            if (this.ActiveCallContext.IsUserAudioInputPaused || this.HandlerToken.IsCancellationRequested)
+            ActiveCallContext activeCall = this.ActiveCallContext;
+            activeCall.DeviceContext.AudioInPacket.ResetAudioBuffer();
+            if (activeCall.IsUserAudioInputPaused || activeCall.IsUserAudioProcessing || this.HandlerToken.IsCancellationRequested)
             {
                 return;
             }
-            if (audioData.Length < 50)
+            if (audioData.Length < AudioProcessSettings.OutputToModelSampleRate * MinimumSpeechDurationMilliseconds / 1000)
             {
-                // Audio too short, cannot recognize
                 this.Logger.LogDebug("设备 {deviceId} 的语音太短。", this.ActiveCallContext.DeviceId);
                 return;
             }
 
-            var workflow = this._audioWorkflowPool.Get();
-            workflow.Initialize(this.ActiveCallContext, audioData);
+            long turnId = activeCall.TurnId;
+            Workflow<float[]> workflow = this._audioWorkflowPool.Get();
+            workflow.Initialize(activeCall, audioData);
+            activeCall.BeginUserAudioProcessing(turnId);
+            _ = this.QueueVoiceDetectedAsync(workflow, turnId);
+        }
 
+        private async Task QueueVoiceDetectedAsync(Workflow<float[]> workflow, long turnId)
+        {
             try
             {
-                this.NextWriter
-                    .WriteAsync(workflow, this.HandlerToken)
-                    .AsTask()
-                    .GetAwaiter()
-                    .GetResult();
+                await this.NextWriter.WriteAsync(workflow, this.HandlerToken);
             }
             catch (OperationCanceledException)
             {
                 this._audioWorkflowPool.Return(workflow);
+                this.ActiveCallContext.CompleteUserAudioProcessing(turnId);
             }
-            catch
+            catch (ChannelClosedException)
             {
                 this._audioWorkflowPool.Return(workflow);
+                this.ActiveCallContext.CompleteUserAudioProcessing(turnId);
+            }
+            catch (Exception exception)
+            {
+                this._audioWorkflowPool.Return(workflow);
+                this.ActiveCallContext.CompleteUserAudioProcessing(turnId);
+                this.Logger.LogError(exception, "设备 {DeviceId} 的语音片段入队失败。", this.ActiveCallContext.DeviceId);
             }
         }
 

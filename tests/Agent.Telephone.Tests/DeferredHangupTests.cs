@@ -35,6 +35,44 @@ public sealed class DeferredHangupTests
     }
 
     [Fact]
+    public void UserAudioProcessing_IsReleasedOnlyByTheOwningTurn()
+    {
+        using TestCallSession session = CreateCall();
+        session.Call.RestartTurn();
+        long turnId = session.Call.TurnId;
+
+        session.Call.BeginUserAudioProcessing(turnId);
+
+        Assert.True(session.Call.IsUserAudioProcessing);
+        Assert.False(session.Call.CompleteUserAudioProcessing(turnId + 1));
+        Assert.True(session.Call.IsUserAudioProcessing);
+        Assert.True(session.Call.CompleteUserAudioProcessing(turnId));
+        Assert.False(session.Call.IsUserAudioProcessing);
+    }
+
+    [Fact]
+    public void StaleAsrCallback_DoesNotInterruptTheCurrentTurnOrReleaseItsInputLock()
+    {
+        using TestCallSession session = CreateCall();
+        session.Call.RestartTurn();
+        long currentTurnId = session.Call.TurnId;
+        session.Call.BeginUserAudioProcessing(currentTurnId);
+        var audio2Text = new Audio2TextHandler(
+            audioWorkflowPool: null!,
+            textWorkflowPool: null!,
+            CreateConfig(),
+            NullLogger<Audio2TextHandler>.Instance)
+        {
+            ActiveCallContext = session.Call
+        };
+
+        audio2Text.OnSpeechTextConverted(currentTurnId - 1, success: true, text: "过期结果");
+
+        Assert.Equal(currentTurnId, session.Call.TurnId);
+        Assert.True(session.Call.IsUserAudioProcessing);
+    }
+
+    [Fact]
     public void PausedInput_DiscardsQueuedVadAndAsrCallbacks()
     {
         using TestCallSession session = CreateCall();
@@ -60,7 +98,7 @@ public sealed class DeferredHangupTests
         };
 
         audioReceived.OnVoiceDetected(new float[50]);
-        audio2Text.OnSpeechTextConverted(success: true, text: "再见");
+        audio2Text.OnSpeechTextConverted(turnId, success: true, text: "再见");
 
         Assert.Equal(turnId, session.Call.TurnId);
     }

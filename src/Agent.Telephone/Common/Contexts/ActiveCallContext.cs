@@ -30,6 +30,7 @@ namespace Agent.Telephone.Common.Contexts
         private bool _assistantSwitching;
         private int _agentMediaPaused;
         private int _userAudioInputPaused;
+        private long _userAudioProcessingTurnId = -1;
         private long _hangupAfterReplyTurnId = -1;
         private TaskCompletionSource<bool>? _promptPlaybackCompletion;
 
@@ -90,6 +91,7 @@ namespace Agent.Telephone.Common.Contexts
         public CancellationToken Token => this._turnCts.Token;
         public bool IsAgentMediaPaused => Volatile.Read(ref this._agentMediaPaused) != 0;
         public bool IsUserAudioInputPaused => Volatile.Read(ref this._userAudioInputPaused) != 0;
+        public bool IsUserAudioProcessing => Interlocked.Read(ref this._userAudioProcessingTurnId) >= 0;
         public bool IsAgentSwitching
         {
             get
@@ -108,6 +110,9 @@ namespace Agent.Telephone.Common.Contexts
         public void ResumeAgentMedia() => Interlocked.Exchange(ref this._agentMediaPaused, 0);
         public void PauseUserAudioInput() => Interlocked.Exchange(ref this._userAudioInputPaused, 1);
         public void ResumeUserAudioInput() => Interlocked.Exchange(ref this._userAudioInputPaused, 0);
+        public void BeginUserAudioProcessing(long turnId) => Interlocked.Exchange(ref this._userAudioProcessingTurnId, turnId);
+        public bool CompleteUserAudioProcessing(long turnId) =>
+            Interlocked.CompareExchange(ref this._userAudioProcessingTurnId, -1, turnId) == turnId;
 
         public bool TryBeginHangupAfterReply()
         {

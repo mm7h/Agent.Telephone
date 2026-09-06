@@ -63,7 +63,7 @@ public sealed class SileroNativeVadTests
 
         await vad.AnalysisVoiceAsync(call.DeviceId, new float[512], segmentAudio, CancellationToken.None);
 
-        Assert.Collection(callback.DetectedSegments, detected => Assert.Same(segmentAudio, detected));
+        Assert.Collection(callback.DetectedSegments, detected => Assert.Equal(5 * 512, detected.Length));
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public sealed class SileroNativeVadTests
 
         await vad.AnalysisVoiceAsync(call.DeviceId, new float[512], segmentAudio, CancellationToken.None);
 
-        Assert.Collection(callback.DetectedSegments, detected => Assert.Same(segmentAudio, detected));
+        Assert.Collection(callback.DetectedSegments, detected => Assert.Equal(6 * 512, detected.Length));
     }
 
     [Fact]

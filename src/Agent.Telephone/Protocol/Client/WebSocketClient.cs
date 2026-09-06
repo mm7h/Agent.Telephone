@@ -91,6 +91,11 @@ namespace Agent.Telephone.Protocol.WebSocket
                         .Subscribe(e =>
                         {
                             e.CancelReconnection = true;
+                            if (e.Exception is not null)
+                            {
+                                this.OnError?.Invoke(WebSocketError.ConnectionClosedPrematurely, e.Exception.Message);
+                            }
+
                             this.OnClose?.Invoke(e.CloseStatus, e.CloseStatusDescription);
 
                         });

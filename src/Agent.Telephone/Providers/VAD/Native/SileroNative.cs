@@ -133,6 +133,10 @@ namespace Agent.Telephone.Providers.VAD.Native
                     }
 
                     this._vadSessionState.LastIsVoice = isSpeechDetected;
+                    if (isSpeechDetected)
+                    {
+                        this._vadSessionState.AppendSpeechAudio(chunk);
+                    }
 
                     if (!this._vadSessionState.HaveVoice)
                     {
@@ -158,11 +162,16 @@ namespace Agent.Telephone.Providers.VAD.Native
                             this.Logger.LogDebug("设备 {deviceId} 的语音已停止，静默持续时间：{silenceDuration}ms", deviceId, silenceDurationMs);
                             this._vadSessionState.VoiceStop = true;
 
-                            this._vadEventCallback?.OnVoiceDetected(bufferedAudioData);
+                            this._vadEventCallback?.OnVoiceDetected(this._vadSessionState.TakeSpeechAudio());
                             this._vadSessionState.Reset();
                             this._pendingAudio = [];
                             return Task.CompletedTask;
                         }
+                    }
+
+                    if (!this._vadSessionState.HaveVoice && this._vadSessionState.CountVoiceInWindow() == 0)
+                    {
+                        this._vadSessionState.ResetSpeechAudio();
                     }
                 }
 

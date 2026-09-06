@@ -14,6 +14,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         private IAsr? _asr;
         private readonly ObjectPool<Workflow<float[]>> _audioWorkflowPool;
         private readonly ObjectPool<Workflow<string>> _textWorkflowPool;
+        private long _processingTurnId = -1;
 
         public Audio2TextHandler(ObjectPool<Workflow<float[]>> audioWorkflowPool, ObjectPool<Workflow<string>> textWorkflowPool,
             TelephoneConfig config, 
@@ -61,30 +62,45 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         {
             if (!this.CheckWorkflowValid(workflow))
             {
+                this.ActiveCallContext.CompleteUserAudioProcessing(workflow.TurnId);
                 return;
             }
             if (this._asr is null)
             {
                 this.Logger.LogError("ASR提供程序未为设备配置: {deviceId}。", this.ActiveCallContext.DeviceId);
+                this.ActiveCallContext.CompleteUserAudioProcessing(workflow.TurnId);
                 return;
             }
 
             try
             {
+                Interlocked.Exchange(ref this._processingTurnId, workflow.TurnId);
                 await this._asr.ConvertSpeechTextAsync(workflow, AudioProcessSettings.OutputToModelSampleRate, this.HandlerToken);
             }
             catch (OperationCanceledException)
             {
+                this.CompleteUserAudioProcessing(workflow.TurnId);
                 this.Logger.LogDebug("ASR 处理已取消，设备 {DeviceId}", this.ActiveCallContext.DeviceId);
             }
             catch (Exception ex)
             {
+                this.CompleteUserAudioProcessing(workflow.TurnId);
                 this.Logger.LogError(ex, "处理来自设备 {deviceId} 的语音转文本数据包失败。", this.ActiveCallContext.DeviceId);
             }
         }
 
-        public async void OnSpeechTextConverted(bool success, string text)
+        public async void OnSpeechTextConverted(long turnId, bool success, string text)
         {
+            this.CompleteUserAudioProcessing(turnId);
+            if (turnId != this.ActiveCallContext.TurnId)
+            {
+                this.Logger.LogDebug(
+                    "忽略设备 {DeviceId} 过期的 ASR 结果，Turn {TurnId}，当前 Turn {CurrentTurnId}。",
+                    this.ActiveCallContext.DeviceId,
+                    turnId,
+                    this.ActiveCallContext.TurnId);
+                return;
+            }
             if (!success)
             {
                 this.Logger.LogError("ASR 转换语音文本失败。");
@@ -116,6 +132,25 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             {
                 this._textWorkflowPool.Return(workflow);
             }
+        }
+
+        protected override void OnHandlerTokenChanged()
+        {
+            long turnId = Interlocked.Exchange(ref this._processingTurnId, -1);
+            if (turnId >= 0)
+            {
+                this.ActiveCallContext.CompleteUserAudioProcessing(turnId);
+            }
+        }
+
+        private void CompleteUserAudioProcessing(long turnId)
+        {
+            if (Interlocked.CompareExchange(ref this._processingTurnId, -1, turnId) != turnId)
+            {
+                return;
+            }
+
+            this.ActiveCallContext.CompleteUserAudioProcessing(turnId);
         }
 
         public override void Dispose()

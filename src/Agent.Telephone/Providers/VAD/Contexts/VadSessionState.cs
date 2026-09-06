@@ -20,6 +20,7 @@ namespace Agent.Telephone.Providers.VAD.Contexts
         }
 
         private readonly int _voiceWindowSize;
+        private readonly List<float> _speechAudio = [];
 
         /// <summary>
         /// Index of the next sample to analyze in the audio buffer.
@@ -56,6 +57,23 @@ namespace Agent.Telephone.Providers.VAD.Contexts
         /// Sliding window to track voice activity across multiple frames.
         /// </summary>
         public Queue<bool> VoiceWindow { get; private set; }
+
+        public void AppendSpeechAudio(float[] audioData)
+        {
+            if (audioData.Length > 0)
+            {
+                this._speechAudio.AddRange(audioData);
+            }
+        }
+
+        public float[] TakeSpeechAudio()
+        {
+            float[] speechAudio = this._speechAudio.ToArray();
+            this._speechAudio.Clear();
+            return speechAudio;
+        }
+
+        public void ResetSpeechAudio() => this._speechAudio.Clear();
 
         /// <summary>
         /// Adds a voice detection result to the sliding window.
@@ -94,6 +112,7 @@ namespace Agent.Telephone.Providers.VAD.Contexts
             VoiceStop = false;
             SilenceFrameCount = 0;
             VoiceWindow.Clear();
+            this._speechAudio.Clear();
         }
     }
 }

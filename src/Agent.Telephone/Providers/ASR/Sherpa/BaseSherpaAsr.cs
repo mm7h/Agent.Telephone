@@ -136,7 +136,13 @@ namespace Agent.Telephone.Providers.ASR.Sherpa
                     offlineStream = this._offlineRecognizer.CreateStream();
                     offlineStream.AcceptWaveform(sampleRate, workflow.Data);
 
-                    AsrRequest asrRequest = new AsrRequest(workflow.DeviceId, offlineStream, sampleRate, callback, token);
+                    AsrRequest asrRequest = new AsrRequest(
+                        workflow.DeviceId,
+                        offlineStream,
+                        sampleRate,
+                        workflow.TurnId,
+                        callback,
+                        token);
 
                     await this._requestChannel.Writer.WriteAsync(asrRequest, token);
                     offlineStream = null;
@@ -229,7 +235,31 @@ namespace Agent.Telephone.Providers.ASR.Sherpa
 
                         if (validRequests.Count > 0)
                         {
-                            this._offlineRecognizer.Decode(validRequests.Select(b => b.Stream));
+                            try
+                            {
+                                this._offlineRecognizer.Decode(validRequests.Select(b => b.Stream));
+                            }
+                            catch (Exception ex)
+                            {
+                                foreach (AsrRequest request in validRequests)
+                                {
+                                    try
+                                    {
+                                        request.Callback.OnSpeechTextConverted(request.TurnId, false, string.Empty);
+                                    }
+                                    catch (Exception callbackException)
+                                    {
+                                        this.Logger.LogError(callbackException, "通知设备 {DeviceId} 的 ASR 失败时出错。", request.DeviceId);
+                                    }
+                                    finally
+                                    {
+                                        request.Stream.Dispose();
+                                    }
+                                }
+
+                                this.Logger.LogError(ex, "解码 ASR 请求时出错。");
+                                continue;
+                            }
 
                             foreach (AsrRequest request in validRequests)
                             {
@@ -242,12 +272,12 @@ namespace Agent.Telephone.Providers.ASR.Sherpa
                                     else
                                     {
                                         string resultText = request.Stream.Result.Text;
-                                        request.Callback.OnSpeechTextConverted(true, resultText);
+                                        request.Callback.OnSpeechTextConverted(request.TurnId, true, resultText);
                                     }
                                 }
                                 catch (Exception ex)
                                 {
-                                    request.Callback.OnSpeechTextConverted(false, string.Empty);
+                                    request.Callback.OnSpeechTextConverted(request.TurnId, false, string.Empty);
                                     this.Logger.LogError(ex, "处理 ASR 结果时出错，设备 {DeviceId}", request.DeviceId);
                                 }
                                 finally

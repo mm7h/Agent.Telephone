@@ -62,7 +62,7 @@ namespace Agent.Telephone.Handlers.SIPHandlers
 
             ActiveCallContext activeCall = this.ActiveCallContext;
 
-            if (activeCall.IsAgentMediaPaused || activeCall.IsUserAudioInputPaused)
+            if (activeCall.IsAgentMediaPaused || activeCall.IsUserAudioInputPaused || activeCall.IsUserAudioProcessing)
             {
                 return;
             }

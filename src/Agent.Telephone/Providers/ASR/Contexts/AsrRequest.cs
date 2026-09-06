@@ -6,6 +6,7 @@ namespace Agent.Telephone.Providers.ASR.Contexts
         string DeviceId,
         OfflineStream Stream,
         int SampleRate,
+        long TurnId,
         IAsrEventCallback Callback,
         CancellationToken Token
     );
