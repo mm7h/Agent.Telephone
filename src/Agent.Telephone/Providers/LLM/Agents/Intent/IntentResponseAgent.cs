@@ -1,4 +1,4 @@
-using Microsoft.Agents.AI;
+﻿using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,6 +15,7 @@ using Agent.Telephone.Common.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Exceptions;
 using Agent.Telephone.Helpers;
+using Agent.Telephone.Providers.LLM.AIContextProviders;
 using Agent.Telephone.Providers.LLM.Contexts;
 
 namespace Agent.Telephone.Providers.LLM.Agents.Intent
@@ -42,7 +43,7 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
 """;
 
         private ChatClientAgent? _chatClientAgent;
-        private AgentSession? _agentSession;
+        private SessionChatHistoryProvider? _chatHistoryProvider;
         public IntentResponseAgent(IServiceProvider serviceProvider, ILogger<IntentResponseAgent> logger)
             : base(SubAgentNames.IntentResponseAgent, serviceProvider, logger)
         {
@@ -69,6 +70,7 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
                     return false;
                 }
                 IChatClient chatClient = this.ServiceProvider.GetRequiredKeyedService<IChatClient>($"LLM_{selectedLLMModel}");
+                this._chatHistoryProvider = buildConfig.ChatHistoryProvider;
 
                 ChatClientAgentOptions options = new ChatClientAgentOptions
                 {
@@ -87,7 +89,6 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
                     chatClient: chatClient,
                     options: options,
                     services: this.ServiceProvider);
-                this._agentSession = this._chatClientAgent.CreateSessionAsync().GetAwaiter().GetResult();
                 return true;
             }
             catch (Exception ex)
@@ -133,7 +134,7 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
             {
                 throw new SessionNotInitializedException();
             }
-            if (this._chatClientAgent is null || this._agentSession is null)
+            if (this._chatClientAgent is null)
             {
                 throw new InvalidOperationException("IntentResponseAgent 未初始化。");
             }
@@ -145,22 +146,25 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
 
             string userContent = $"用户的问题或指令：{executionResult.UserMessage}{Environment.NewLine}工具名称：{executionResult.FunctionName}{Environment.NewLine}工具执行结果：{executionResult.Response}{Environment.NewLine}请简洁回复。";
 
+            StringBuilder response = new StringBuilder();
             await foreach (string sentence in this.StreamResponseSentencesAsync(userContent, token))
             {
+                response.Append(sentence);
                 await context.YieldOutputAsync(sentence, token);
             }
+            this._chatHistoryProvider?.Append(ChatRole.Assistant, response.ToString());
         }
 
         private async IAsyncEnumerable<string> StreamResponseSentencesAsync(string userMessage, [EnumeratorCancellation] CancellationToken token)
         {
-            if (this._chatClientAgent is null || this._agentSession is null)
+            if (this._chatClientAgent is null)
             {
                 throw new InvalidOperationException("IntentResponseAgent 未初始化。");
             }
 
             StringBuilder segmentResponse = new StringBuilder();
 
-            await foreach (AgentResponseUpdate update in this._chatClientAgent.RunStreamingAsync(userMessage, this._agentSession, cancellationToken: token))
+            await foreach (AgentResponseUpdate update in this._chatClientAgent.RunStreamingAsync(userMessage, cancellationToken: token))
             {
                 string content = update.Text ?? string.Empty;
                 string text = MarkdownCleaner.CleanMarkdown(Regex.Unescape(content));

@@ -18,6 +18,7 @@ namespace Agent.Telephone.Providers.LLM.Agents
     internal class ChatAgent : BaseAgent<ChatAgent>
     {
         private const string FUNCTION_CALL_INTENT_TYPE = "FunctionCall";
+        private const string INTENT_LLM_INTENT_TYPE = "IntentLlm";
         private const string ENHANCED_CHAT_PROMPT = """
 请在遵守上方角色设定的前提下，额外严格遵守以下回复规则：
 1. 回复要像真实语音聊天，语气自然、简短、直接，第一句先回答核心内容，不要先寒暄，不要自我解释。
@@ -38,16 +39,6 @@ namespace Agent.Telephone.Providers.LLM.Agents
 
         public override int Order => 10;
 
-        public void SetChatHistory(List<ChatMessage> chatHistory)
-        {
-            if (this._agentSession is null)
-            {
-                throw new InvalidOperationException("Chat agent is not built.");
-            }
-
-            this._agentSession.SetInMemoryChatHistory(chatHistory, jsonSerializerOptions: JsonHelper.OPTIONS);
-        }
-
         public override bool Build(LLMAgentBuildConfig agentBuildConfig)
         {
             try
@@ -56,8 +47,21 @@ namespace Agent.Telephone.Providers.LLM.Agents
                 string? summaryMemory = agentBuildConfig.AgentSetting.Config.GetValueOrDefault("SummaryMemory");
                 string intentType = agentBuildConfig.AgentSetting.Config.GetConfigValueOrDefault("IntentType", "None");
                 this._allowFunctionCall = string.Compare(FUNCTION_CALL_INTENT_TYPE, intentType, StringComparison.OrdinalIgnoreCase) == 0;
+                bool exposeToolCapabilities = string.Compare(INTENT_LLM_INTENT_TYPE, intentType, StringComparison.OrdinalIgnoreCase) == 0;
 
                 string instructions = this.BuildInstructions(summaryMemory);
+                if (exposeToolCapabilities)
+                {
+                    string toolDescriptions = FunctionToolHelper.BuildToolDescriptions(agentBuildConfig.SessionPrivateProvider.FunctionTools);
+                    if (!string.IsNullOrWhiteSpace(toolDescriptions))
+                    {
+                        instructions += $"""
+
+当前已注册以下能力。仅当用户询问你能做什么或相关能力时，才自然概括这些能力；不要播报内部函数名、参数或实现细节，也不要因为此说明主动调用工具。
+{toolDescriptions}
+""";
+                    }
+                }
 
                 ChatOptions chatOptions = new ChatOptions
                 {
@@ -87,7 +91,9 @@ namespace Agent.Telephone.Providers.LLM.Agents
                 {
                     Name = SubAgentNames.ChatAgent,
                     Description = $"the agent of {SubAgentNames.ChatAgent}",
-                    ChatOptions = chatOptions
+                    ChatOptions = chatOptions,
+                    ChatHistoryProvider = agentBuildConfig.ChatHistoryProvider,
+                    RequirePerServiceCallChatHistoryPersistence = true
                 };
 
                 IChatClient chatClient = this.ServiceProvider.GetRequiredKeyedService<IChatClient>($"LLM_{agentBuildConfig.AgentSetting.ModelName}");
@@ -187,7 +193,6 @@ namespace Agent.Telephone.Providers.LLM.Agents
                 throw new InvalidOperationException("Chat agent is not built.");
             }
 
-            StringBuilder allResponse = new StringBuilder();
             StringBuilder segmentResponse = new StringBuilder();
 
             await foreach (AgentResponseUpdate update in this._chatClientAgent.RunStreamingAsync(userMessage, this._agentSession, cancellationToken: token))
@@ -202,7 +207,6 @@ namespace Agent.Telephone.Providers.LLM.Agents
                     int splitPosition = match.Index + match.Length;
                     string sentence = currentSegment.Substring(0, splitPosition);
 
-                    allResponse.Append(sentence);
                     yield return sentence;
 
                     string remaining = currentSegment.Substring(splitPosition);
@@ -217,7 +221,6 @@ namespace Agent.Telephone.Providers.LLM.Agents
             if (segmentResponse.Length > 0)
             {
                 string sentence = segmentResponse.ToString();
-                allResponse.Append(sentence);
                 yield return sentence;
             }
         }

@@ -4,10 +4,10 @@ using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Common.Exceptions;
 using Agent.Telephone.Helpers;
+using Agent.Telephone.Providers.LLM.AIContextProviders;
 using Agent.Telephone.Providers.LLM.Agents;
 using Agent.Telephone.Providers.LLM.Contexts;
 using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
@@ -20,6 +20,7 @@ namespace Agent.Telephone.Providers.LLM
 
         private readonly ObjectPool<OutSegment> _outSegmentPool;
         private readonly Dictionary<string, IAgent> _subAgents = new Dictionary<string, IAgent>();
+        private readonly SessionChatHistoryProvider _chatHistoryProvider;
         private Workflow? _dialogueWorkflow;
         private ILlmEventCallback? _eventCallback;
         private int _seqParagraphId = 0;
@@ -27,10 +28,12 @@ namespace Agent.Telephone.Providers.LLM
         private int _responseTimeoutSeconds = 30;
 
         public GenericOpenAI(IServiceProvider serviceProvider,
+            SessionChatHistoryProvider chatHistoryProvider,
             ObjectPool<OutSegment> outSegmentPool,
             ILogger<GenericOpenAI> logger) : base(logger)
         {
             this._serviceProvider = serviceProvider;
+            this._chatHistoryProvider = chatHistoryProvider;
 
             this._outSegmentPool = outSegmentPool;
             this._subAgents = new Dictionary<string, IAgent>();
@@ -66,7 +69,7 @@ namespace Agent.Telephone.Providers.LLM
                     {
                         if (modelSetting.AgentSettings.TryGetValue(agent.AgentName, out ModelSetting? agentSetting))
                         {
-                            return agent.Build(new LLMAgentBuildConfig(agentSetting, modelSetting.SessionPrivateProvider));
+                            return agent.Build(new LLMAgentBuildConfig(agentSetting, modelSetting.SessionPrivateProvider, this._chatHistoryProvider));
                         }
                         else
                         {
@@ -129,15 +132,11 @@ namespace Agent.Telephone.Providers.LLM
         {
             ArgumentNullException.ThrowIfNull(callback);
             this._eventCallback = callback;
+            this._chatHistoryProvider.Bind(activeCall.AIAgentContext.ChatHistory);
 
             foreach (var agent in this._subAgents.Values)
             {
                 agent.RegisterDevice(activeCall.DeviceId);
-            }
-            if (this._subAgents.TryGetValue(SubAgentNames.ChatAgent, out IAgent? chatSubAgent) &&
-                chatSubAgent is ChatAgent chatAgent)
-            {
-                chatAgent.SetChatHistory(activeCall.AIAgentContext.ChatHistory);
             }
             base.RegisterDevice(activeCall);
         }
@@ -174,19 +173,16 @@ namespace Agent.Telephone.Providers.LLM
             ILlmEventCallback eventCallback = this._eventCallback
                 ?? throw new InvalidOperationException("The LLM event callback has not been registered.");
 
-            List<ChatMessage> chatHistory = this.CurrentCall.AIAgentContext.ChatHistory;
-            int chatHistoryCount = chatHistory.Count;
             using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(this._responseTimeoutSeconds));
             try
             {
-                string assistantMessage = await this.RunAndEmitWorkflowStreamingAsync(
+                await this.RunAndEmitWorkflowStreamingAsync(
                     this._dialogueWorkflow,
                     turnId,
                     userMessage,
                     eventCallback,
                     timeoutCts.Token);
-                AppendMissingChatHistory(chatHistory, chatHistoryCount, userMessage, assistantMessage);
                 await eventCallback.OnCompletedAsync(turnId, CancellationToken.None);
             }
             catch (OperationCanceledException) when (!token.IsCancellationRequested && timeoutCts.IsCancellationRequested)
@@ -224,7 +220,7 @@ namespace Agent.Telephone.Providers.LLM
             return $"{paragraphId}_{Interlocked.Increment(ref this._seqSentenceId)}";
         }
 
-        private async Task<string> RunAndEmitWorkflowStreamingAsync(
+        private async Task RunAndEmitWorkflowStreamingAsync(
             Workflow dialogueWorkflow,
             long turnId,
             string userMessage,
@@ -284,8 +280,6 @@ namespace Agent.Telephone.Providers.LLM
                     await eventCallback.OnSegmentAsync(turnId, pendingSegment, token);
                 }
 
-                return string.Concat(allSegments.Select(segment => segment.Content));
-
             }
             catch (OperationCanceledException)
             {
@@ -314,28 +308,6 @@ namespace Agent.Telephone.Providers.LLM
                 }
             }
         }
-
-        private static void AppendMissingChatHistory(
-            List<ChatMessage> chatHistory,
-            int previousCount,
-            string userMessage,
-            string assistantMessage)
-        {
-            IReadOnlyList<ChatMessage> currentTurnMessages = chatHistory.Skip(previousCount).ToArray();
-            if (!currentTurnMessages.Any(message =>
-                message.Role == ChatRole.User &&
-                string.Equals(message.Text, userMessage, StringComparison.Ordinal)))
-            {
-                chatHistory.Add(new ChatMessage(ChatRole.User, userMessage));
-            }
-
-            if (!string.IsNullOrWhiteSpace(assistantMessage) &&
-                !currentTurnMessages.Any(message => message.Role == ChatRole.Assistant))
-            {
-                chatHistory.Add(new ChatMessage(ChatRole.Assistant, assistantMessage));
-            }
-        }
-
 
         public override void Dispose()
         {

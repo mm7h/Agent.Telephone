@@ -268,12 +268,7 @@ namespace Agent.Telephone.Providers.AudioProcessor
                         return;
                     }
 
-                    IReadOnlyList<string> audioFiles = GetGreetingAudioFiles(activeCall.AssistantConfig.DialingNumber);
-                    if (audioFiles.Count == 0)
-                    {
-                        this.Logger.LogWarning("客服号码 {AssistantNumber} 不是纯数字，无法播放首呼问候。", activeCall.AssistantConfig.DialingNumber);
-                        return;
-                    }
+                    IReadOnlyList<string> audioFiles = GetGreetingAudioFiles();
 
                     activeCall.MarkPlayingPrompt();
                     bool fixedAudioPlayed = await this.PlayCachedPromptAsync(
@@ -387,15 +382,11 @@ namespace Agent.Telephone.Providers.AudioProcessor
                 : templates[Random.Shared.Next(templates.Length)];
         }
 
-        internal static IReadOnlyList<string> GetGreetingAudioFiles(string assistantNumber)
+        internal static IReadOnlyList<string> GetGreetingAudioFiles()
         {
-            if (string.IsNullOrWhiteSpace(assistantNumber) || assistantNumber.Any(static character => character < '0' || character > '9'))
-            {
-                return [];
-            }
-
-            var paths = new List<string>(assistantNumber.Length + 1);
-            foreach (char character in assistantNumber)
+            string serviceAgentId = Random.Shared.Next(10_000).ToString("D4");
+            var paths = new List<string>(serviceAgentId.Length + 1);
+            foreach (char character in serviceAgentId)
             {
                 paths.Add($"numbers/{character}.mp3");
             }

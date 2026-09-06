@@ -13,6 +13,7 @@ using Agent.Telephone.Providers.CallControl;
 using Agent.Telephone.Providers.CallControl.Reservations;
 using Agent.Telephone.Providers.Dtmf;
 using Agent.Telephone.Providers.LLM;
+using Agent.Telephone.Providers.LLM.AIContextProviders;
 using Agent.Telephone.Providers.LLM.Agents;
 using Agent.Telephone.Providers.LLM.Agents.Intent;
 using Agent.Telephone.Providers.OfflineDialogue;
@@ -425,6 +426,7 @@ namespace Agent.Telephone.Management
             services.AddKeyedTransient<IAgent, ChatAgent>(SubAgentNames.ChatAgent);
             services.AddKeyedTransient<IAgent, OutputAgent>(SubAgentNames.OutputAgent);
             services.AddTransient<ILlm, GenericOpenAI>();
+            services.AddTransient<SessionChatHistoryProvider>();
         }
         #endregion
 

@@ -17,29 +17,13 @@ namespace Agent.Telephone.Tests;
 public sealed class InitialGreetingTests
 {
     [Fact]
-    public void GetGreetingAudioFiles_UsesEachDialedDigitThenServicePrompt()
+    public void GetGreetingAudioFiles_UsesFourRandomDigitsThenServicePrompt()
     {
-        IReadOnlyList<string> audioFiles = DefaultAudioProcessor.GetGreetingAudioFiles("10000");
+        IReadOnlyList<string> audioFiles = DefaultAudioProcessor.GetGreetingAudioFiles();
 
-        Assert.Equal(
-            [
-                "numbers/1.mp3",
-                "numbers/0.mp3",
-                "numbers/0.mp3",
-                "numbers/0.mp3",
-                "numbers/0.mp3",
-                "prompt/service_agent.mp3"
-            ],
-            audioFiles);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("100-00")]
-    [InlineData("客服")]
-    public void GetGreetingAudioFiles_RejectsNonNumericAssistantNumber(string assistantNumber)
-    {
-        Assert.Empty(DefaultAudioProcessor.GetGreetingAudioFiles(assistantNumber));
+        Assert.Equal(5, audioFiles.Count);
+        Assert.All(audioFiles.Take(4), audioFile => Assert.Matches(@"^numbers/[0-9]\.mp3$", audioFile));
+        Assert.Equal("prompt/service_agent.mp3", audioFiles[4]);
     }
 
     [Fact]

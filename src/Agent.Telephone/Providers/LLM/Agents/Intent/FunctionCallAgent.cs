@@ -5,6 +5,7 @@ using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Common.Exceptions;
 using Agent.Telephone.Helpers;
+using Agent.Telephone.Providers.LLM.AIContextProviders;
 using Agent.Telephone.Providers.LLM.Contexts;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
@@ -16,6 +17,7 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
     internal sealed class FunctionCallAgent : BaseAgent<FunctionCallAgent>
     {
         private PrivateProvider? _sessionPrivateProvider;
+        private SessionChatHistoryProvider? _chatHistoryProvider;
 
         public FunctionCallAgent(IServiceProvider serviceProvider, ILogger<FunctionCallAgent> logger)
             : base(SubAgentNames.FunctionCallAgent, serviceProvider, logger)
@@ -28,6 +30,7 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
         public override bool Build(LLMAgentBuildConfig buildConfig)
         {
             this._sessionPrivateProvider = buildConfig.SessionPrivateProvider;
+            this._chatHistoryProvider = buildConfig.ChatHistoryProvider;
             return true;
         }
 
@@ -48,6 +51,7 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
                 throw new SessionNotInitializedException();
             }
 
+            this._chatHistoryProvider?.Append(ChatRole.User, detection.UserMessage);
             IList<AITool> tools = this._sessionPrivateProvider?.FunctionTools ?? (IList<AITool>)new List<AITool>();
 
             if (this.ShouldContinueChat(detection.Function))
@@ -67,14 +71,25 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
             if (func is null)
             {
                 this.Logger.LogWarning("FunctionCallAgent: 未找到工具 '{FunctionName}'，跳过调用。", function.Name);
+                this.AppendToolResult(function.Name, "工具未找到。");
                 await context.SendMessageAsync(new FunctionExecutionResult(function.Name, null, ToolAction.Silent, detection.UserMessage), token);
                 return;
             }
 
             AIFunctionArguments args = this.CreateFunctionArguments(function);
 
-            object? result = await func.InvokeAsync(args, token);
+            object? result;
+            try
+            {
+                result = await func.InvokeAsync(args, token);
+            }
+            catch (Exception exception)
+            {
+                this.AppendToolResult(function.Name, exception.Message);
+                throw;
+            }
             FunctionExecutionResult executionResult = this.NormalizeExecutionResult(detection, result);
+            this.AppendToolResult(executionResult.FunctionName, executionResult.Response ?? "(empty)");
 
             this.Logger.LogDebug("FunctionCallAgent: '{FunctionName}' 调用结果：{Result}", detection.Function?.Name, executionResult.Response ?? "(empty)");
             await context.SendMessageAsync(executionResult, token);
@@ -196,6 +211,11 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
             }
 
             return JsonHelper.Serialize(result);
+        }
+
+        private void AppendToolResult(string functionName, string result)
+        {
+            this._chatHistoryProvider?.Append(ChatRole.Assistant, $"{functionName} 执行结果：{result}");
         }
 
         public override void Dispose() { }

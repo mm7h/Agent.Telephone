@@ -113,7 +113,7 @@
 
 #### 2. 下载模型文件和FFmpeg
 
-从 [Agent.Telephone Resource Files](https://github.com/mm7h/Agent.Telephone/releases#release-resources) 下载 FFmpeg 与 ONNX 模型资源。
+当前项目是从 [XiaoZhi.Net] 衍生而来，你可以从 [XiaoZhi.Net Resource Files](https://github.com/mm7h/XiaoZhi.Net/releases#release-resources) 下载 FFmpeg 与 ONNX 模型资源。
 根据项目目录结构将资源文件放到对应的目录中。
 
 #### 3. 项目构建与运行

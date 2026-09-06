@@ -9,7 +9,6 @@ using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using System.Text;
 
 namespace Agent.Telephone.Providers.LLM.Agents.Intent
 {
@@ -94,7 +93,7 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
 
                 this.Logger.LogInformation("IntentDetectionAgent: 已加载 {ToolCount} 个函数工具。", tools.Count);
 
-                string instructions = this.BuildIntentDetectionPrompt(this.BuildToolDescriptions(tools));
+                string instructions = this.BuildIntentDetectionPrompt(FunctionToolHelper.BuildToolDescriptions(tools));
                 ChatClientAgentOptions options = new ChatClientAgentOptions
                 {
                     Name = SubAgentNames.IntentDetectionAgent,
@@ -204,49 +203,6 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
                 this.Logger.LogError("IntentDetectionAgent: LLM 返回的响应中包含无效的 JSON。");
                 return false;
             }
-        }
-
-        private string BuildToolDescriptions(IList<AITool> tools)
-        {
-            StringBuilder sb = new StringBuilder();
-            foreach (AITool tool in tools)
-            {
-                FunctionMetadata metadata = tool is AIFunction aiFunction
-                    ? aiFunction.ToFunctionMetadata()
-                    : new FunctionMetadata { Name = tool.Name, Description = tool.Description };
-
-                sb.AppendLine();
-                sb.Append("函数名: ").AppendLine(metadata.Name);
-                if (!string.IsNullOrWhiteSpace(metadata.Description))
-                {
-                    sb.Append("描述: ").AppendLine(metadata.Description);
-                }
-
-                if (metadata.Parameters is not null && metadata.Parameters.Count > 0)
-                {
-                    sb.AppendLine("参数:");
-                    foreach (FunctionParameter parameter in metadata.Parameters)
-                    {
-                        sb.Append("- ").Append(parameter.Name).Append(" (").Append(parameter.Type).Append(")");
-                        if (parameter.Required)
-                        {
-                            sb.Append(" [required]");
-                        }
-                        if (!string.IsNullOrWhiteSpace(parameter.Description))
-                        {
-                            sb.Append(": ").Append(parameter.Description);
-                        }
-                        sb.AppendLine();
-                    }
-                }
-                else
-                {
-                    sb.AppendLine("参数: 不需要参数");
-                }
-
-                sb.AppendLine("---");
-            }
-            return sb.ToString();
         }
 
         private string BuildIntentDetectionPrompt(string toolDescriptions)
