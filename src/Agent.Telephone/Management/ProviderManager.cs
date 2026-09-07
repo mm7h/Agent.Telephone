@@ -7,6 +7,7 @@ using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Common.Exceptions;
 using Agent.Telephone.Helpers;
 using Agent.Telephone.Providers;
+using Agent.Telephone.Providers.ASR.Aliyun;
 using Agent.Telephone.Providers.ASR.Sherpa;
 using Agent.Telephone.Providers.AudioProcessor;
 using Agent.Telephone.Providers.CallControl;
@@ -17,6 +18,7 @@ using Agent.Telephone.Providers.LLM.AIContextProviders;
 using Agent.Telephone.Providers.LLM.Agents;
 using Agent.Telephone.Providers.LLM.Agents.Intent;
 using Agent.Telephone.Providers.OfflineDialogue;
+using Agent.Telephone.Providers.TTS.Aliyun;
 using Agent.Telephone.Providers.TTS.Huoshan;
 using Agent.Telephone.Providers.TTS.Sherpa;
 using Agent.Telephone.Providers.VAD.Native;
@@ -386,6 +388,9 @@ namespace Agent.Telephone.Management
                     case "paraformer":
                         services.AddKeyedSingleton<IAsr, Paraformer>(modelName);
                         break;
+                    case "aliyun-realtime":
+                        services.AddKeyedTransient<IAsr, AliyunRealtimeASR>(modelName);
+                        break;
                     default:
                         throw new ModelBuildException("Invalid asr model.");
                 }
@@ -444,8 +449,12 @@ namespace Agent.Telephone.Management
                     case "huoshan-bidirection":
                         services.AddKeyedTransient<ITts, HuoshanBidirectionTTS>(modelName);
                         break;
+                    case "aliyun-realtime-t-t-s":
+                    case "aliyun-realtime-tts":
+                        services.AddKeyedTransient<ITts, AliyunRealtimeTTS>(modelName);
+                        break;
                     case "huoshan-http":
-                        services.AddSingleton(_ => new FlurlClientCache()
+                        services.AddKeyedSingleton<IFlurlClientCache>(nameof(HuoshanHttpTTS), (_, _) => new FlurlClientCache()
                         .Add(nameof(HuoshanHttpTTS), configure: builder =>
                         {
                             builder.Settings.JsonSerializer = new DefaultJsonSerializer(JsonHelper.OPTIONS);
@@ -453,12 +462,20 @@ namespace Agent.Telephone.Management
                         services.AddKeyedTransient<ITts, HuoshanHttpTTS>(modelName);
                         break;
                     case "huoshan-http-v3":
-                        services.AddSingleton(_ => new FlurlClientCache()
+                        services.AddKeyedSingleton<IFlurlClientCache>(nameof(HuoshanHttpV3TTS), (_, _) => new FlurlClientCache()
                         .Add(nameof(HuoshanHttpV3TTS), configure: builder =>
                         {
                             builder.Settings.JsonSerializer = new DefaultJsonSerializer(JsonHelper.OPTIONS);
                         }));
                         services.AddKeyedTransient<ITts, HuoshanHttpV3TTS>(modelName);
+                        break;
+                    case "aliyun-http":
+                        services.AddKeyedSingleton<IFlurlClientCache>(nameof(AliyunHttpTTS), (_, _) => new FlurlClientCache()
+                        .Add(nameof(AliyunHttpTTS), configure: builder =>
+                        {
+                            builder.Settings.JsonSerializer = new DefaultJsonSerializer(JsonHelper.OPTIONS);
+                        }));
+                        services.AddKeyedTransient<ITts, AliyunHttpTTS>(modelName);
                         break;
                     default:
                         throw new ModelBuildException("Invalid tts model.");

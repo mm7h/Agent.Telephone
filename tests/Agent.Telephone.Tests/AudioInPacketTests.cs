@@ -6,7 +6,7 @@ namespace Agent.Telephone.Tests;
 public sealed class AudioInPacketTests
 {
     [Fact]
-    public void TrimOldAudio_PreservesFullVadDetectionWindowByDefault()
+    public void TrimOldAudio_PreservesStreamingAsrPreRollByDefault()
     {
         var audioInPacket = new AudioInPacket();
         float[] audio = Enumerable.Range(1, 10 * 512).Select(static value => (float)value).ToArray();
@@ -14,6 +14,6 @@ public sealed class AudioInPacketTests
         audioInPacket.PushAudio(audio);
         audioInPacket.TrimOldAudio();
 
-        Assert.Equal(audio[^4096..], audioInPacket.GetAllAudio());
+        Assert.Equal(audio, audioInPacket.GetAllAudio());
     }
 }

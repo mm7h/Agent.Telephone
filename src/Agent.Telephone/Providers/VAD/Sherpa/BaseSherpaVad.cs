@@ -108,8 +108,13 @@ namespace Agent.Telephone.Providers.VAD.Sherpa
 
                     if (session.Detector.IsSpeechDetected())
                     {
+                        bool voiceStarted = !session.State.HaveVoice;
                         session.State.HaveVoice = true;
                         session.State.HaveVoiceLatestTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+                        if (voiceStarted)
+                        {
+                            session.Callback.OnVoiceStarted();
+                        }
                         continue;
                     }
 

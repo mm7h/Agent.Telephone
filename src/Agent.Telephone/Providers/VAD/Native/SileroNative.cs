@@ -146,6 +146,7 @@ namespace Agent.Telephone.Providers.VAD.Native
                             this._vadSessionState.HaveVoice = true;
                             this._vadSessionState.HaveVoiceLatestTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
                             this._vadSessionState.SilenceFrameCount = 0;
+                            this._vadEventCallback?.OnVoiceStarted();
                         }
                     }
                     else if (isSpeechDetected)

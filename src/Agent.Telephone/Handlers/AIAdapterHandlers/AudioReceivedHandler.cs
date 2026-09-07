@@ -2,6 +2,7 @@ using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Providers;
+using Agent.Telephone.Providers.ASR.Contexts;
 using Agent.Telephone.Providers.VAD;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
@@ -14,9 +15,17 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         private const int MinimumSpeechDurationMilliseconds = 500;
 
         private IAudioProcessor? _audioProcessor;
+        private IAsr? _asr;
         private IVad? _vad;
+        private readonly object _streamingQueueGate = new();
         private readonly ObjectPool<Workflow<byte[]>> _rtpPacketWorkflowPool;
         private readonly ObjectPool<Workflow<float[]>> _audioWorkflowPool;
+        private Task _streamingOperationTail = Task.CompletedTask;
+        private bool _streamingUtteranceActive;
+        private bool _streamingUtteranceFailed;
+        private long _streamingUtteranceTurnId = -1;
+        private int _maxQueuedStreamingAudioFrames = 1;
+        private int _queuedStreamingAudioFrames;
 
         public AudioReceivedHandler(
             ObjectPool<Workflow<byte[]>> rtpPacketWorkflowPool,
@@ -47,9 +56,15 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
 
             this._audioProcessor = privateProvider.AudioProcessor;
+            this._asr = privateProvider.Asr;
             this._vad = privateProvider.Vad;
             this._vad.RegisterDevice(this.ActiveCallContext, this);
             this._audioProcessor.RegisterDevice(this.ActiveCallContext);
+
+            this._maxQueuedStreamingAudioFrames = Math.Max(
+                1,
+                AudioProcessSettings.StreamingAsrMaxQueuedAudioMilliseconds
+                    / Math.Max(1, this.ActiveCallContext.PacketTimeMs));
 
             this.RegisterCancellationToken(this.ActiveCallContext);
             return true;
@@ -101,6 +116,11 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
                 this.ActiveCallContext.DeviceContext.AudioInPacket.PushAudio(pcmData);
 
+                if (this._asr?.IsStreaming == true)
+                {
+                    this.HandleStreamingAudio(pcmData);
+                }
+
                 await this._vad.AnalysisVoiceAsync(
                     this.ActiveCallContext.DeviceId,
                     pcmData,
@@ -129,6 +149,30 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             if (audioData.Length < AudioProcessSettings.OutputToModelSampleRate * MinimumSpeechDurationMilliseconds / 1000)
             {
                 this.Logger.LogDebug("设备 {deviceId} 的语音太短。", this.ActiveCallContext.DeviceId);
+                if (this._asr?.IsStreaming == true)
+                {
+                    this.AbortStreamingUtterance();
+                }
+                return;
+            }
+
+            if (this._asr?.IsStreaming == true &&
+                (this._streamingUtteranceActive || this._streamingUtteranceFailed))
+            {
+                if (this._streamingUtteranceFailed)
+                {
+                    this.AbortStreamingUtterance();
+                    return;
+                }
+
+                long streamingTurnId = this._streamingUtteranceTurnId;
+                if (streamingTurnId != activeCall.TurnId || !this.FinishStreamingUtterance())
+                {
+                    this.AbortStreamingUtterance();
+                    return;
+                }
+
+                activeCall.BeginUserAudioProcessing(streamingTurnId);
                 return;
             }
 
@@ -137,6 +181,19 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             workflow.Initialize(activeCall, audioData);
             activeCall.BeginUserAudioProcessing(turnId);
             _ = this.QueueVoiceDetectedAsync(workflow, turnId);
+        }
+
+        public void OnVoiceStarted()
+        {
+            if (this._asr?.IsStreaming != true ||
+                this.ActiveCallContext.IsUserAudioInputPaused ||
+                this.ActiveCallContext.IsUserAudioProcessing ||
+                this.HandlerToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            this.StartStreamingUtterance();
         }
 
         private async Task QueueVoiceDetectedAsync(Workflow<float[]> workflow, long turnId)
@@ -175,9 +232,172 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             {
                 return;
             }
+            this.AbortStreamingUtterance();
             this.Logger.LogDebug("设备 {deviceId} 检测到长时间静音，挂断电话。", activeCall.DeviceId);
             activeCall.MarkEnding();
             activeCall.UserAgent.Hangup();
+        }
+
+        protected override void OnHandlerTokenChanged()
+        {
+            this.AbortStreamingUtterance();
+        }
+
+        private void HandleStreamingAudio(float[] pcmData)
+        {
+            if (!this._streamingUtteranceActive || this._streamingUtteranceFailed)
+            {
+                return;
+            }
+
+            this.QueueStreamingOperation(pcmData, StreamingAsrOperation.Audio, this._streamingUtteranceTurnId);
+        }
+
+        private void StartStreamingUtterance()
+        {
+            if (this._asr is null || this._streamingUtteranceActive || this.HandlerToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            this._streamingUtteranceActive = true;
+            this._streamingUtteranceFailed = false;
+            this._streamingUtteranceTurnId = this.ActiveCallContext.TurnId;
+            int preRollSamples = AudioProcessSettings.OutputToModelSampleRate
+                * AudioProcessSettings.StreamingAsrPreRollMilliseconds / 1000;
+            float[] preRollAudio = this.ActiveCallContext.DeviceContext.AudioInPacket.GetLatestAudio(preRollSamples);
+            this.QueueStreamingOperation(preRollAudio, StreamingAsrOperation.Start, this._streamingUtteranceTurnId);
+        }
+
+        private bool FinishStreamingUtterance()
+        {
+            if (this._asr is null || !this._streamingUtteranceActive)
+            {
+                return false;
+            }
+
+            this._streamingUtteranceActive = false;
+            this.QueueStreamingOperation([], StreamingAsrOperation.Finish, this._streamingUtteranceTurnId);
+            return true;
+        }
+
+        private void AbortStreamingUtterance()
+        {
+            if (this._asr?.IsStreaming != true)
+            {
+                return;
+            }
+
+            this._streamingUtteranceActive = false;
+            long turnId = this._streamingUtteranceTurnId;
+            this._streamingUtteranceTurnId = -1;
+            if (turnId < 0)
+            {
+                return;
+            }
+
+            this.ObserveStreamingOperation(
+                this.SendStreamingOperationAsync([], StreamingAsrOperation.Abort, turnId, CancellationToken.None),
+                StreamingAsrOperation.Abort,
+                turnId);
+        }
+
+        private void QueueStreamingOperation(float[] audioData, StreamingAsrOperation operation, long turnId)
+        {
+            if (this._asr is null)
+            {
+                return;
+            }
+
+            if (operation == StreamingAsrOperation.Audio &&
+                Interlocked.Increment(ref this._queuedStreamingAudioFrames) > this._maxQueuedStreamingAudioFrames)
+            {
+                Interlocked.Decrement(ref this._queuedStreamingAudioFrames);
+                this._streamingUtteranceFailed = true;
+                this.Logger.LogWarning("设备 {DeviceId} 的流式 ASR 音频队列已满，已中止当前语音。", this.ActiveCallContext.DeviceId);
+                this.AbortStreamingUtterance();
+                return;
+            }
+
+            lock (this._streamingQueueGate)
+            {
+                CancellationToken operationToken = this.HandlerToken;
+                this._streamingOperationTail = this._streamingOperationTail
+                    .ContinueWith(
+                        _ => this.SendStreamingOperationAsync(audioData, operation, turnId, operationToken),
+                        CancellationToken.None,
+                        TaskContinuationOptions.None,
+                        TaskScheduler.Default)
+                    .Unwrap();
+            }
+
+            this.ObserveStreamingOperation(this._streamingOperationTail, operation, turnId);
+        }
+
+        private async Task SendStreamingOperationAsync(
+            float[] audioData,
+            StreamingAsrOperation operation,
+            long turnId,
+            CancellationToken token)
+        {
+            IAsr? asr = this._asr;
+            if (asr is null)
+            {
+                return;
+            }
+
+            Workflow<float[]> workflow = this._audioWorkflowPool.Get();
+            try
+            {
+                workflow.Initialize(this.ActiveCallContext, audioData, turnId);
+                await asr.ConvertSpeechTextStreamingAsync(
+                    workflow,
+                    AudioProcessSettings.OutputToModelSampleRate,
+                    operation,
+                    token);
+            }
+            finally
+            {
+                this._audioWorkflowPool.Return(workflow);
+            }
+        }
+
+        private void ObserveStreamingOperation(Task operationTask, StreamingAsrOperation operation, long turnId)
+        {
+            _ = operationTask.ContinueWith(
+                completed =>
+                {
+                    if (operation == StreamingAsrOperation.Audio)
+                    {
+                        Interlocked.Decrement(ref this._queuedStreamingAudioFrames);
+                    }
+
+                    if (completed.IsCanceled)
+                    {
+                        return;
+                    }
+
+                    if (completed.Exception is null)
+                    {
+                        return;
+                    }
+
+                    if (operation is StreamingAsrOperation.Start or StreamingAsrOperation.Finish)
+                    {
+                        this._streamingUtteranceActive = false;
+                        this._streamingUtteranceFailed = true;
+                        this.ActiveCallContext.CompleteUserAudioProcessing(turnId);
+                    }
+
+                    this.Logger.LogError(
+                        completed.Exception,
+                        "设备 {DeviceId} 的流式 ASR {Operation} 操作失败。",
+                        this.ActiveCallContext.DeviceId,
+                        operation);
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.None,
+                TaskScheduler.Default);
         }
 
         public override void Dispose()

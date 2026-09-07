@@ -23,12 +23,17 @@
 
         public void Initialize(ActiveCallContext activeCall, T data)
         {
+            this.Initialize(activeCall, data, activeCall.TurnId);
+        }
+
+        public void Initialize(ActiveCallContext activeCall, T data, long turnId)
+        {
             this._deviceId = activeCall.DeviceId;
             this._callId = activeCall.CallId;
             this._callerNumber = activeCall.CallerNumber;
             this._dialedNumber = activeCall.DialedNumber;
             this._data = data;
-            this._turnId = activeCall.TurnId;
+            this._turnId = turnId;
         }
 
         public void Reset()

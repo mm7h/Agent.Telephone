@@ -209,6 +209,10 @@ public sealed class SileroNativeVadTests
     {
         public List<float[]> DetectedSegments { get; } = [];
 
+        public void OnVoiceStarted()
+        {
+        }
+
         public void OnVoiceDetected(float[] audioData)
         {
             this.DetectedSegments.Add(audioData);

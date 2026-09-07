@@ -127,6 +127,7 @@ public sealed class PrivateProviderLifetimeTests
         public string ProviderType { get; }
         public string ModelName => nameof(TrackingProvider);
         public bool IsSherpaModel { get; }
+        public bool IsStreaming => false;
         public int FrameSize => 0;
         public event Action<float[], bool, bool, string?>? OnMixedAudioDataAvailable
         {
@@ -156,6 +157,11 @@ public sealed class PrivateProviderLifetimeTests
         public Task AnalysisVoiceAsync(string deviceId, float[] newAudioData, float[] bufferedAudioData, CancellationToken token) => Task.CompletedTask;
         public void ResetSessionState(string deviceId) { }
         public Task ConvertSpeechTextAsync(Workflow<float[]> workflow, int sampleRate, CancellationToken token) => Task.CompletedTask;
+        public Task ConvertSpeechTextStreamingAsync(
+            Workflow<float[]> workflow,
+            int sampleRate,
+            Agent.Telephone.Providers.ASR.Contexts.StreamingAsrOperation operation,
+            CancellationToken token) => Task.CompletedTask;
         public Task SynthesisAsync(Workflow<OutSegment> workflow, CancellationToken token) => Task.CompletedTask;
         public string? GetSavedAudioFilePath(string sentenceId) => null;
         public ValueTask AppendAssistantSegmentAsync(

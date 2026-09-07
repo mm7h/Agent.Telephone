@@ -6,6 +6,7 @@ using Agent.Telephone.Media.Abstractions;
 using Agent.Telephone.Providers.TTS.Huoshan.Protocols.Models;
 using Flurl.Http;
 using Flurl.Http.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Agent.Telephone.Providers.TTS.Huoshan
@@ -24,7 +25,10 @@ namespace Agent.Telephone.Providers.TTS.Huoshan
         private float? _volumeRatio;
         private float? _pitchRatio;
 
-        public HuoshanHttpTTS(IAudioEditor audioEditor, IFlurlClientCache flurlClientCache, ILogger<HuoshanHttpTTS> logger) : base(audioEditor, logger)
+        public HuoshanHttpTTS(
+            IAudioEditor audioEditor,
+            [FromKeyedServices(FLURL_CLIENT_NAME)] IFlurlClientCache flurlClientCache,
+            ILogger<HuoshanHttpTTS> logger) : base(audioEditor, logger)
         {
             this._flurlClientCache = flurlClientCache;
         }

@@ -35,6 +35,7 @@ namespace Agent.Telephone.Providers.ASR.Sherpa
         public int BatchWaitTimeMs { get; protected set; } = 20;
         public AudioSavingConfig? AudioSavingConfig { get; protected set; }
         public override string ProviderType => "asr";
+        public bool IsStreaming => false;
 
         protected void Build(OfflineRecognizerConfig offlineRecognizerConfig, ModelSetting modelSetting)
         {
@@ -162,6 +163,15 @@ namespace Agent.Telephone.Providers.ASR.Sherpa
                     offlineStream?.Dispose();
                 }
             }
+        }
+
+        public Task ConvertSpeechTextStreamingAsync(
+            Workflow<float[]> workflow,
+            int sampleRate,
+            StreamingAsrOperation operation,
+            CancellationToken token)
+        {
+            throw new NotSupportedException($"{this.ModelName} does not support streaming ASR.");
         }
 
         private async Task ProcessingAsync()

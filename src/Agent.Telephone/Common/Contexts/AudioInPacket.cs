@@ -61,6 +61,18 @@ namespace Agent.Telephone.Common.Contexts
             return this._audioBuffer.Get(this._audioBuffer.Head, this._audioBuffer.Size);
         }
 
+        public float[] GetLatestAudio(int maxSamples)
+        {
+            if (this._released || this._audioBuffer.Size == 0 || maxSamples <= 0)
+            {
+                return [];
+            }
+
+            int sampleCount = Math.Min(maxSamples, this._audioBuffer.Size);
+            int startIndex = this._audioBuffer.Head + this._audioBuffer.Size - sampleCount;
+            return this._audioBuffer.Get(startIndex, sampleCount);
+        }
+
         public void ResetAudioBuffer()
         {
             if (!this._released)
@@ -84,7 +96,7 @@ namespace Agent.Telephone.Common.Contexts
             this._audioBuffer.Dispose();
         }
 
-        public void TrimOldAudio(int keepFrames = PRE_SPEECH_BUFFER_SAMPLES)
+        public void TrimOldAudio(int keepFrames = Agent.Telephone.Common.Constants.AudioProcessSettings.OutputToModelSampleRate * Agent.Telephone.Common.Constants.AudioProcessSettings.StreamingAsrPreRollMilliseconds / 1000)
         {
             if (!this._released && this._audioBuffer.Size > keepFrames)
             {
