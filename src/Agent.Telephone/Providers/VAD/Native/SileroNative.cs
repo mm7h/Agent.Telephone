@@ -217,7 +217,8 @@ namespace Agent.Telephone.Providers.VAD.Native
 
         private void CheckLongTermSilence(string deviceId, VadSessionState vadState)
         {
-            if (vadState.HaveVoiceLatestTime == 0)
+            // 用户等待回复的时间不计入静音挂断倒计时，仍继续检测语音以支持打断。
+            if (vadState.HaveVoiceLatestTime == 0 || this._vadEventCallback?.IsWaitingForReply == true)
             {
                 vadState.HaveVoiceLatestTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
                 return;

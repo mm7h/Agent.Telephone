@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.1" />
+    <InternalsVisibleTo Include="Agent.Telephone.Tests" />
   </ItemGroup>
 
   <ItemGroup>

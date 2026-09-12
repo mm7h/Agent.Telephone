@@ -66,6 +66,13 @@ public sealed class AudioReceivedHandlerTests
                 ActiveCallContext = activeCall
             };
 
+            Assert.True(device.TryBeginBackgroundReply(activeCall));
+            Assert.True(handler.IsWaitingForReply);
+            handler.OnLongTermSilence();
+            Assert.True(activeCall.UserAgent.IsCallActive);
+            Assert.False(serverHungup.Task.IsCompleted);
+            device.EndBackgroundReply();
+            Assert.False(handler.IsWaitingForReply);
             handler.OnLongTermSilence();
 
             await serverHungup.Task.WaitAsync(TimeSpan.FromSeconds(5));

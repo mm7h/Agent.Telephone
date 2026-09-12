@@ -5,6 +5,7 @@ using Agent.Telephone.Abstractions;
 using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Sample.Server;
 using Agent.Telephone.Sample.Server.FunctionTools;
+using Agent.Telephone.Sample.Server.FunctionTools.Codex;
 using Agent.Telephone.Sample.Server.MessageStore;
 using Microsoft.Extensions.Hosting;
 

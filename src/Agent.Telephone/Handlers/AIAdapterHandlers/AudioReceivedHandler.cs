@@ -220,6 +220,8 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
         }
 
+        public bool IsWaitingForReply => this.ActiveCallContext.DeviceContext.IsReplyInProgress;
+
         public void OnVoiceSilence()
         {
             this.ActiveCallContext.DeviceContext.AudioInPacket.TrimOldAudio();
@@ -228,7 +230,7 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
         public void OnLongTermSilence()
         {
             ActiveCallContext activeCall = this.ActiveCallContext;
-            if (!activeCall.UserAgent.IsCallActive)
+            if (!activeCall.UserAgent.IsCallActive || this.IsWaitingForReply)
             {
                 return;
             }

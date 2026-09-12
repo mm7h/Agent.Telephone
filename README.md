@@ -156,7 +156,7 @@ dotnet run
 | 💾 可扩展持久化 | 通过 `ITelephoneStore` 接口持久化注册、对话、消息分段与投递状态；示例提供 SQLite 实现。 |
 | 🔊 多媒体音频 | 使用 FFmpeg 解码、重采样、混音与编码，并提供内置号码、等待音和错误提示音。 |
 | 🛠️ 可配置模型能力 | VAD、ASR、LLM、TTS 与 Intent 均可通过配置选择已有实现。 |
-| 💻 Codex 任务助理 | 示例号码 `10088` 可调用独立 Codex CLI 执行非交互任务；该能力为可选示例。|
+| 💻 Codex 任务助理 | 示例号码 `10088` 可调用独立 Codex CLI 执行非交互任务，并按用户和 Assistant 续接 Thread；该能力为可选示例。 |
 
 > 🎯 Assistant 切换不是重新建立电话。系统会保留原有 SIP dialogue、媒体会话与设备身份，只切换当前 Assistant 的配置与能力。
 
@@ -215,7 +215,7 @@ flowchart LR
 - **HT701 是当前唯一明确验证的硬件**，但其他 HTx01 或第三方 FXS 网关如支持标准 SIP 注册、RTP、PCMU/PCMA 与 RFC2833，原理基本上都大同小异，可以利用自行查询文档进行配置或者对本项目进行二次适配开发。
 - 项目应在可信任的局域网内部署。
 - HT701 只是电话网关，不负责 AI 状态、角色切换或回复恢复；所有并发、取消、媒体与持久化逻辑都由服务端管理。
-- `10088` Codex Assistant 使用 `codex exec --ephemeral` 执行非交互任务，不提供电话审批、追问或 Codex Thread 恢复，不应直接作为生产主机管理入口。
+- `10088` Codex 任务助理会保存并续接 Codex Thread，但不提供电话审批、运行中追问或写入权限升级，不应直接作为生产主机管理入口。部署前请阅读 [Codex 任务助理配置指南](docs/10-Codex助手.md)。
 - 注意个人隐私，不要泄露 Api Key 等敏感数据。
 - 修改配置或二次开发前，请先阅读 [安全、隐私与生产运行边界](docs/08-安全、隐私与生产运行边界.md)。
 - 本项目的实现方式仅供参考，若要发布到生产环境建议使用 [FreeSwitch](https://github.com/signalwire/freeswitch) / [Asterisk](https://github.com/asterisk/asterisk) 或者其他成熟的商业框架。

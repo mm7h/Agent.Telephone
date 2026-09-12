@@ -22,6 +22,8 @@ namespace Agent.Telephone.FunctionTools.Adapters
 
         public string? CallerNumber => this._activeCall.CallerNumber;
 
+        public string? UserAor => this._activeCall.UserAor;
+
         public string? AssistantNumber => this._activeCall.DialedNumber;
 
         public bool IsCallActive => this._activeCall.UserAgent.IsCallActive;

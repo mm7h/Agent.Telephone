@@ -6,6 +6,7 @@ using Agent.Telephone.Abstractions.FunctionTools;
 using Agent.Telephone.Abstractions.Persistence;
 using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
+using Agent.Telephone.FunctionTools.Adapters;
 using Agent.Telephone.Management;
 using Agent.Telephone.Sample.Server.FunctionTools;
 using Microsoft.Extensions.AI;
@@ -22,6 +23,15 @@ namespace Agent.Telephone.Tests;
 
 public sealed class AssistantSwitchFunctionToolTests
 {
+    [Fact]
+    public void AssistantControlAdapter_ExposesStableUserAor()
+    {
+        using TestCallSession session = CreateCall(CreateConfig(), "10000");
+        IAssistantControl control = new AssistantControlAdapter(session.Call);
+        Assert.Equal("sip:1001@device.test", control.UserAor);
+        Assert.Equal("10000", control.AssistantNumber);
+    }
+
     [Fact]
     public async Task BuildForActiveCallAsync_RegistersOnlyTheToolsAllowedForTheAssistantAsync()
     {

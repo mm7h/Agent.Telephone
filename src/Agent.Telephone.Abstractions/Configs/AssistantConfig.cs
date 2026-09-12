@@ -23,6 +23,8 @@
         public string ASR { get; set; }
         public string Intent { get; set; }
         public string LLM { get; set; }
+        /// <summary>每轮对话（含工具执行）的最长秒数；null 沿用 LLM 模型配置，0 不限制时长。</summary>
+        public int? LLMResponseTimeoutSeconds { get; set; }
         public string TTS { get; set; }
         public List<Dictionary<string, string>> TTSSettings { get; set; }
         public List<string> AllowedTools { get; set; }

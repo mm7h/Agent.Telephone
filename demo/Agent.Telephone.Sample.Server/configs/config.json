@@ -30,6 +30,8 @@
       "ASR": "SenseVoice",
       "Intent": "FunctionCall",
       "LLM": "Deepseek",
+      // LLM 响应超时时间，单位秒。0 不限时长，省略默认 30 秒。
+      "LLMResponseTimeoutSeconds": 30,
       "TTS": "HuoshanBidirection",
       "TTSSettings": [
         // 可以设置多种音色
@@ -68,6 +70,8 @@
       "ASR": "SenseVoice",
       "Intent": "FunctionCall",
       "LLM": "Deepseek",
+      // LLM 响应超时时间，单位秒。0 不限时长，省略默认 30 秒。
+      "LLMResponseTimeoutSeconds": 30,
       "TTS": "HuoshanBidirection",
       "TTSSettings": [
         {
@@ -97,6 +101,8 @@
       "ASR": "SenseVoice",
       "Intent": "IntentLlm", // 如果要使用按键回馈来触发自定义function tool，则必须使用`FunctionCall`类型
       "LLM": "Deepseek",
+      // LLM 响应超时时间，单位秒。0 不限时长，省略默认 30 秒。
+      "LLMResponseTimeoutSeconds": 30,
       "TTS": "HuoshanBidirection",
       "TTSSettings": [
         {
@@ -118,6 +124,8 @@
       "ASR": "SenseVoice",
       "Intent": "FunctionCall",
       "LLM": "Deepseek",
+      // 每轮对话包含 Codex 执行，最多等待 30 分钟；0 不限时长，省略则沿用模型配置（默认 30 秒）。
+      "LLMResponseTimeoutSeconds": 1800,
       "TTS": "HuoshanBidirection",
       "TTSSettings": [
         {
@@ -175,6 +183,18 @@
           "Format": "wav"
           */
           }
+        },
+        "AliyunRealtime": {
+          // 阿里云实时 ASR 使用 16 kHz、单声道、16-bit PCM，支持边说边传。
+          "ApiKey": "to your aliyun api key",
+          "ModelName": "qwen-audio-3.0-asr-flash-streaming",
+          "Region": "cn-beijing",
+          // 可选：业务空间 ID。Endpoint 优先，留空则使用共享 DashScope 地址。
+          "WorkspaceId": "",
+          "SegmentDurationMs": 100,
+          "LanguageHints": "zh,en",
+          "ConnectionTimeoutSeconds": 5,
+          "ResponseTimeoutSeconds": 15
         }
       },
       "LLM": {
@@ -214,6 +234,50 @@
           "ResourceId": "volc.service_type.10029",
           "SpeechRate": 0,
           "LoudnessRate": 0,
+          "FileSavingOption": {
+            "SaveFile": true,
+            "SavePath": "./data/tts-cache",
+            "Format": "mp3"
+          }
+        },
+        "AliyunRealtimeTTS": {
+          // Qwen-Audio-TTS 与 CosyVoice 共用此实时 WebSocket Provider。
+          "ApiKey": "to your aliyun api key",
+          "ModelName": "cosyvoice-v3-flash",
+          "Voice": "longanfengyue",
+          "Region": "cn-beijing",
+          // 可选：业务空间 ID。Endpoint 优先，留空则使用共享 DashScope 地址。
+          "WorkspaceId": "",
+          "Format": "pcm",
+          "SampleRate": 24000,
+          "Volume": 50,
+          "Rate": 1.0,
+          "Pitch": 1.0,
+          "LanguageHints": "zh",
+          "Instruction": "",
+          "ConnectionTimeoutSeconds": 5,
+          "ResponseTimeoutSeconds": 30,
+          "FileSavingOption": {
+            "SaveFile": true,
+            "SavePath": "./data/tts-cache",
+            "Format": "mp3"
+          }
+        },
+        "AliyunHttp": {
+          // 非实时 HTTP TTS：false 下载完整音频，true 使用 SSE 分块返回 PCM。
+          "ApiKey": "to your aliyun api key",
+          "WorkspaceId": "to your workspace id",
+          "ModelName": "cosyvoice-v3-flash",
+          "Voice": "longanfengyue",
+          "Streaming": false,
+          "Format": "pcm",
+          "SampleRate": 24000,
+          "Volume": 50,
+          "Rate": 1.0,
+          "Pitch": 1.0,
+          "LanguageHints": "zh",
+          "Instruction": "",
+          "ResponseTimeoutSeconds": 120,
           "FileSavingOption": {
             "SaveFile": true,
             "SavePath": "./data/tts-cache",

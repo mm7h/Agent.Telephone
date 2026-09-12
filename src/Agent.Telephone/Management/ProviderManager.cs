@@ -215,9 +215,7 @@ namespace Agent.Telephone.Management
                     { SubAgentNames.OutputAgent, ModelSetting.Empty },
                 };
 
-                LLMBuildConfig llmBuildConfig = new LLMBuildConfig(
-                    agentSettings,
-                    activeCall.AIAgentContext.PrivateProvider);
+                LLMBuildConfig llmBuildConfig = new LLMBuildConfig(agentSettings, activeCall.AIAgentContext.PrivateProvider, activeCall.AssistantConfig.LLMResponseTimeoutSeconds);
 
                 if (!pendingLlm.Build(llmBuildConfig))
                 {

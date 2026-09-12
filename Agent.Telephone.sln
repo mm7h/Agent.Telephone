@@ -19,6 +19,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{B3E4F594-7
 		docs\07-故障排查与运维.md = docs\07-故障排查与运维.md
 		docs\08-安全、隐私与生产运行边界.md = docs\08-安全、隐私与生产运行边界.md
 		docs\09-项目目录、外部资源与内置提示音.md = docs\09-项目目录、外部资源与内置提示音.md
+		docs\10-Codex助手.md = docs\10-Codex助手.md
 		docs\README.md = docs\README.md
 	EndProjectSection
 EndProject

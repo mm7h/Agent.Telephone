@@ -237,6 +237,17 @@ namespace Agent.Telephone.Common.Contexts
             }
         }
 
+        public bool IsReplyInProgress
+        {
+            get
+            {
+                lock (this._callSessionLock)
+                {
+                    return this._backgroundReplyCount > 0;
+                }
+            }
+        }
+
         public bool TryBeginBackgroundReply(ActiveCallContext activeCall)
         {
             lock (this._callSessionLock)

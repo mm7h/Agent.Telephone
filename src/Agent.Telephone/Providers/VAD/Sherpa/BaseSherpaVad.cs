@@ -154,7 +154,8 @@ namespace Agent.Telephone.Providers.VAD.Sherpa
 
         private void CheckLongTermSilence(string deviceId, SherpaVadSession session)
         {
-            if (session.State.HaveVoiceLatestTime == 0)
+            // 每个设备使用自己的回调状态，共享 VAD 不能读取其他通话的等待状态。
+            if (session.State.HaveVoiceLatestTime == 0 || session.Callback.IsWaitingForReply)
             {
                 session.State.HaveVoiceLatestTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
                 return;

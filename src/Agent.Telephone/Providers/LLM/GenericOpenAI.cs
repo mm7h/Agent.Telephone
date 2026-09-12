@@ -47,7 +47,13 @@ namespace Agent.Telephone.Providers.LLM
             {
                 this._subAgents.Clear();
                 this._dialogueWorkflow = null;
-                this._responseTimeoutSeconds = Math.Max(1, modelSetting.AgentSettings[SubAgentNames.ChatAgent].Config.GetConfigValueOrDefault("ResponseTimeoutSeconds", 30));
+                this._responseTimeoutSeconds = modelSetting.ResponseTimeoutSeconds
+                    ?? modelSetting.AgentSettings[SubAgentNames.ChatAgent].Config.GetConfigValueOrDefault("ResponseTimeoutSeconds", 30);
+                // CancelAfter 的有限时长上限为 uint.MaxValue - 1 毫秒。
+                if (this._responseTimeoutSeconds < 0 || this._responseTimeoutSeconds > 4_294_967)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(modelSetting), "LLM 响应超时必须为 0（不限时长）或 1 到 4294967 秒。");
+                }
 
                 IAgent inputAgent = this._serviceProvider.GetRequiredKeyedService<IAgent>(SubAgentNames.InputAgent);
                 IAgent intentDetectionAgent = this._serviceProvider.GetRequiredKeyedService<IAgent>(SubAgentNames.IntentDetectionAgent);
@@ -174,7 +180,10 @@ namespace Agent.Telephone.Providers.LLM
                 ?? throw new InvalidOperationException("The LLM event callback has not been registered.");
 
             using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(this._responseTimeoutSeconds));
+            if (this._responseTimeoutSeconds > 0)
+            {
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(this._responseTimeoutSeconds));
+            }
             try
             {
                 await this.RunAndEmitWorkflowStreamingAsync(
@@ -236,7 +245,7 @@ namespace Agent.Telephone.Providers.LLM
 
             try
             {
-                await foreach (WorkflowEvent workflowEvent in run.WatchStreamAsync())
+                await foreach (WorkflowEvent workflowEvent in run.WatchStreamAsync(token))
                 {
                     token.ThrowIfCancellationRequested();
 
@@ -268,6 +277,8 @@ namespace Agent.Telephone.Providers.LLM
                     }
                 }
 
+                token.ThrowIfCancellationRequested();
+
                 // 流结束，将最后一句标记为IsLastSegment后发出
                 if (pendingSegment is not null)
                 {
@@ -288,6 +299,8 @@ namespace Agent.Telephone.Providers.LLM
                 {
                     allSegments.Add(pendingSegment);
                 }
+                // 停止观察事件流不会取消执行器，必须显式取消运行中的模型和工具。
+                await run.CancelRunAsync();
                 this.Logger.LogDebug("Dialogue workflow cancelled after {count} segments.", allSegments.Count);
                 throw;
             }

@@ -20,6 +20,33 @@ namespace Agent.Telephone.Tests;
 public sealed class SileroNativeVadTests
 {
     [Fact]
+    public async Task AnalysisVoiceAsync_ExcludesReplyWaitFromSilenceTimeoutAsync()
+    {
+        SequenceVadOnnxModel model = new([0, 0, 0]);
+        VadCallback callback = new() { IsWaitingForReply = true };
+        using SIPTransport transport = new();
+        using DeviceContext device = this.CreateDevice(transport);
+        using ActiveCallContext call = this.CreateCall(transport, device);
+        using SileroNative vad = this.CreateVad(model);
+        vad.RegisterDevice(call, callback);
+        Agent.Telephone.Providers.VAD.Contexts.VadSessionState state =
+            (Agent.Telephone.Providers.VAD.Contexts.VadSessionState)typeof(SileroNative)
+                .GetField("_vadSessionState", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(vad)!;
+        state.HaveVoiceLatestTime = DateTimeOffset.Now.AddMinutes(-3).ToUnixTimeMilliseconds();
+        float[] audio = new float[512];
+
+        await vad.AnalysisVoiceAsync(call.DeviceId, audio, audio, CancellationToken.None);
+        Assert.Equal(0, callback.LongTermSilenceCount);
+        callback.IsWaitingForReply = false;
+        await vad.AnalysisVoiceAsync(call.DeviceId, audio, audio, CancellationToken.None);
+        Assert.Equal(0, callback.LongTermSilenceCount);
+
+        state.HaveVoiceLatestTime = DateTimeOffset.Now.AddMinutes(-3).ToUnixTimeMilliseconds();
+        await vad.AnalysisVoiceAsync(call.DeviceId, audio, audio, CancellationToken.None);
+        Assert.Equal(1, callback.LongTermSilenceCount);
+    }
+
+    [Fact]
     public async Task AnalysisVoiceAsync_DoesNotSplitContinuousSpeech()
     {
         var model = new SequenceVadOnnxModel(Enumerable.Repeat(0.9f, 30));
@@ -222,8 +249,12 @@ public sealed class SileroNativeVadTests
         {
         }
 
+        public bool IsWaitingForReply { get; set; }
+        public int LongTermSilenceCount { get; private set; }
+
         public void OnLongTermSilence()
         {
+            this.LongTermSilenceCount++;
         }
     }
 }

@@ -14,6 +14,11 @@ namespace Agent.Telephone.Abstractions.FunctionTools
         string? CallerNumber { get; }
 
         /// <summary>
+        /// 获取当前用户的 SIP AOR；未提供身份的实现返回 null。
+        /// </summary>
+        string? UserAor => null;
+
+        /// <summary>
         /// 获取当前通话绑定的助手号码。
         /// </summary>
         string? AssistantNumber { get; }

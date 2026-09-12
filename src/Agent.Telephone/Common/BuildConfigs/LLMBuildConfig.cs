@@ -5,5 +5,6 @@ namespace Agent.Telephone.Common.Configs
 {
     internal record LLMBuildConfig(
         Dictionary<string, ModelSetting> AgentSettings,
-        PrivateProvider SessionPrivateProvider);
+        PrivateProvider SessionPrivateProvider,
+        int? ResponseTimeoutSeconds = null);
 }

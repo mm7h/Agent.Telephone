@@ -331,11 +331,13 @@ await service.CommitAsync(cancellationToken);
 
 ## ⏳ 5. Codex 长任务工具
 
-示例宿主的 `CodexAssistant` 是无构造依赖的 `PrivateFunctionTool`。它只负责将明确任务作为一个参数传给 `codex exec --ephemeral`，同时持续读取 stdout/stderr，避免子进程缓冲阻塞。stdout 的最终消息会作为工具结果交还当前 LLM；stderr 仅被消费以避免阻塞，不会写入电话回复或日志。
+示例宿主的 `CodexAssistant` 是无构造依赖的 `PrivateFunctionTool`。`RunCodexTaskAsync` 只把本次明确任务写入 CLI 标准输入，不拼接电话聊天历史。首次调用创建 Thread；同一用户和 Assistant 的后续调用默认按已保存的 ID 执行 `codex exec resume`，只有 `startNewTask: true` 才创建新 Thread。
+
+工具持续读取 stdout/stderr，避免子进程缓冲阻塞。stdout 中的 JSON 事件用于保存 Thread ID 并确认任务完成，`--output-last-message` 文件中的最终消息才会交还当前 LLM；stderr 仅被排空，不会写入电话回复或日志。进程内的 Codex 调用串行执行，排队期间也响应取消。
 
 调用方法接受当前 Turn 的 `CancellationToken`：用户新说话、角色切换或服务停止会终止子进程；普通 SIP 挂断不会取消该 Turn。任务完成时，如果用户已经离线，回复会写为未读消息，并使用既有回拨/留言流程投递。
 
-当前版本刻意不包含等待音、电话 DTMF 审批、运行中追问、Codex Thread 恢复或写入沙箱。任务应在开始前就足够明确，并适合只读、非交互执行。需要这些能力时，应单独设计双向协议、权限与回拨生命周期，不能在工具中临时拼接。
+当前版本支持跨来电续接 Codex Thread，但仍不包含等待音、电话 DTMF 审批、运行中追问或写入权限升级。任务应在开始前足够明确，并适合只读、非交互执行。完整行为与配置见 [Codex 任务助理配置指南](10-Codex助手.md)。
 
 ## ✅ 6. 二开检查清单
 
