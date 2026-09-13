@@ -53,6 +53,9 @@ namespace Agent.Telephone.Codex.FunctionTools
                 CodexConversationId? conversationId = startNewTask
                     ? null
                     : await this._threadStore.GetConversationIdAsync(userAor, assistantNumber, cancellationToken);
+                this.Logger.LogInformation(
+                    "[CodexInvocation] 开始调用 Codex CLI，任务模式：{TaskMode}。",
+                    conversationId is null ? "新建" : "续接");
                 CodexFunctionRequest request = new(taskPrompt, this._options.WorkingDirectory, conversationId);
                 CodexFunctionResult result;
                 if (this._codexFunction is ICodexFunctionLifecycle lifecycle)

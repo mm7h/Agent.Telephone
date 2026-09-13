@@ -15,6 +15,7 @@ using Agent.Telephone.Codex.Persistence;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -197,6 +198,19 @@ public sealed class CodexAssistantTests
         Assert.False(File.Exists(Path.Combine(fixture.Root, "runs.txt")));
     }
 
+    [Fact]
+    public async Task RunCodexTaskAsync_LogsCodexInvocationWithoutTaskPromptAsync()
+    {
+        using Fixture fixture = new();
+        CapturingLogger logger = new();
+        const string TaskPrompt = "不得写入日志的任务文本";
+
+        await fixture.CreateTool(logger: logger).RunCodexTaskAsync(TaskPrompt);
+
+        Assert.Equal("[CodexInvocation] 开始调用 Codex CLI，任务模式：新建。", logger.Message);
+        Assert.DoesNotContain(TaskPrompt, logger.Message);
+    }
+
     private sealed class Fixture : IDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "telephone-codex-test-" + Guid.NewGuid().ToString("N"));
@@ -279,12 +293,12 @@ public sealed class CodexAssistantTests
             return options;
         }
 
-        public CodexAssistant CreateTool(string? userAor = "sip:user@one.test", string assistantNumber = "100")
+        public CodexAssistant CreateTool(string? userAor = "sip:user@one.test", string assistantNumber = "100", ILogger? logger = null)
         {
             CodexAssistantOptions options = this.CreateOptions();
             return new CodexAssistant(new CodexAppServerFunction(options), new CodexThreadStore(options), options)
             {
-                Logger = NullLogger.Instance,
+                Logger = logger ?? NullLogger.Instance,
                 CallControl = new Control(userAor, assistantNumber),
             };
         }
@@ -351,6 +365,27 @@ public sealed class CodexAssistantTests
                 {
                     Thread.Sleep(100);
                 }
+            }
+        }
+    }
+
+    private sealed class CapturingLogger : ILogger
+    {
+        public string? Message { get; private set; }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Information)
+            {
+                this.Message = formatter(state, exception);
             }
         }
     }
