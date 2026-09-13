@@ -236,15 +236,32 @@ namespace Agent.Telephone.Providers.LLM
             ILlmEventCallback eventCallback,
             CancellationToken token)
         {
-            await using StreamingRun run = await InProcessExecution.Concurrent.RunStreamingAsync(dialogueWorkflow, userMessage, this.CurrentCall.DeviceId, token);
-
             List<OutSegment> allSegments = new List<OutSegment>();
             string paragraphId = this.GenerateId();
-            int segmentCount = 0;
+            int deliveredSegmentCount = 0;
             OutSegment? pendingSegment = null; // 缓冲上一句，等待确认是否为最后一段
+            StreamingRun? run = null;
+            using SemaphoreSlim promptGate = new(1, 1);
+
+            Guid promptRegistrationId = ToolExecutionPromptDispatcher.Register(this.CurrentCall.DeviceId, this.CurrentCall.AIAgentContext.PrivateProvider, async (prompt, callbackToken) =>
+            {
+                await promptGate.WaitAsync(callbackToken);
+                OutSegment segment = this._outSegmentPool.Get();
+                try
+                {
+                    segment.Initialize(prompt, true, true, paragraphId, this.GenerateSentenceId(paragraphId));
+                    await eventCallback.OnToolExecutionPromptAsync(turnId, segment, callbackToken);
+                }
+                finally
+                {
+                    this._outSegmentPool.Return(segment);
+                    promptGate.Release();
+                }
+            });
 
             try
             {
+                run = await InProcessExecution.Concurrent.RunStreamingAsync(dialogueWorkflow, userMessage, this.CurrentCall.DeviceId, token);
                 await foreach (WorkflowEvent workflowEvent in run.WatchStreamAsync(token))
                 {
                     token.ThrowIfCancellationRequested();
@@ -257,17 +274,17 @@ namespace Agent.Telephone.Providers.LLM
                             if (pendingSegment is not null)
                             {
                                 allSegments.Add(pendingSegment);
-                                if (segmentCount == 1)
+                                if (deliveredSegmentCount == 0)
                                 {
                                     await eventCallback.OnBeforeFirstSegmentAsync(turnId, pendingSegment, token);
                                 }
                                 await eventCallback.OnSegmentAsync(turnId, pendingSegment, token);
+                                deliveredSegmentCount++;
                             }
 
                             OutSegment segment = this._outSegmentPool.Get();
-                            segment.Initialize(output.ResponseText, segmentCount == 0, false, paragraphId, this.GenerateSentenceId(paragraphId));
+                            segment.Initialize(output.ResponseText, deliveredSegmentCount == 0, false, paragraphId, this.GenerateSentenceId(paragraphId));
                             pendingSegment = segment;
-                            segmentCount++;
                             break;
 
                         case WorkflowErrorEvent workflowErrorEvent:
@@ -284,7 +301,7 @@ namespace Agent.Telephone.Providers.LLM
                 {
                     pendingSegment.IsLastSegment = true;
                     allSegments.Add(pendingSegment);
-                    if (segmentCount == 1)
+                    if (deliveredSegmentCount == 0)
                     {
                         await eventCallback.OnBeforeFirstSegmentAsync(turnId, pendingSegment, token);
                     }
@@ -300,7 +317,10 @@ namespace Agent.Telephone.Providers.LLM
                     allSegments.Add(pendingSegment);
                 }
                 // 停止观察事件流不会取消执行器，必须显式取消运行中的模型和工具。
-                await run.CancelRunAsync();
+                if (run is not null)
+                {
+                    await run.CancelRunAsync();
+                }
                 this.Logger.LogDebug("Dialogue workflow cancelled after {count} segments.", allSegments.Count);
                 throw;
             }
@@ -315,6 +335,11 @@ namespace Agent.Telephone.Providers.LLM
             }
             finally
             {
+                ToolExecutionPromptDispatcher.Unregister(this.CurrentCall.DeviceId, promptRegistrationId);
+                if (run is not null)
+                {
+                    await run.DisposeAsync();
+                }
                 foreach (OutSegment segment in allSegments.Distinct())
                 {
                     this._outSegmentPool.Return(segment);
@@ -331,7 +356,6 @@ namespace Agent.Telephone.Providers.LLM
             this._subAgents.Clear();
             this._dialogueWorkflow = null;
         }
-
 
         private static string NormalizeDeviceId(string deviceId)
         {

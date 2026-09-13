@@ -9,6 +9,8 @@ namespace Agent.Telephone.Sample.Server.FunctionTools
 {
     public class HangupCall : PrivateFunctionTool
     {
+        private const string FAREWELL_INSTRUCTION = "用户已明确希望结束通话。请用一句自然、简短且不提出新问题的话向用户告别。";
+
         [Description("当来电者明确表示要结束当前通话时调用，例如“再见”“拜拜”“挂了吧”或“结束通话”。调用后会先向用户告别，播报完成后再挂断电话，不能用于普通告别、转接或其他操作。")]
         [ToolBehavior(ToolAction.Continue)]
         public FunctionReturn<string> HangupCurrentCall()
@@ -22,13 +24,13 @@ namespace Agent.Telephone.Sample.Server.FunctionTools
                 };
             }
 
-            const string farewellInstruction = "用户已明确希望结束通话。请用一句自然、简短且不提出新问题的话向用户告别。";
+
             this.Logger.LogInformation("LLM 请求在告别播报完成后挂断当前通话。");
             this.CallControl.HangupCurrentCallAfterReply();
             return new FunctionReturn<string>
             {
-                Result = farewellInstruction,
-                Response = farewellInstruction,
+                Result = FAREWELL_INSTRUCTION,
+                Response = FAREWELL_INSTRUCTION,
                 Next = ToolAction.Continue
             };
         }

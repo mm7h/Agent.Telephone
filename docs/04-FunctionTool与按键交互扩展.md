@@ -331,9 +331,9 @@ await service.CommitAsync(cancellationToken);
 
 ## ⏳ 5. Codex 长任务工具
 
-示例宿主的 `CodexAssistant` 是无构造依赖的 `PrivateFunctionTool`。`RunCodexTaskAsync` 只把本次明确任务写入 CLI 标准输入，不拼接电话聊天历史。首次调用创建 Thread；同一用户和 Assistant 的后续调用默认按已保存的 ID 执行 `codex exec resume`，只有 `startNewTask: true` 才创建新 Thread。
+示例宿主通过 `.WithCodexAssistant(options => ...)` 注册来自 `Agent.Telephone.Codex` 的构造注入式 `PrivateFunctionTool`。`RunCodexTaskAsync` 只把本次明确任务写入 App Server，不拼接电话聊天历史。首次调用创建 Thread；同一用户和 Assistant 的后续调用按已保存的 ID 发送 `thread/resume`，只有 `startNewTask: true` 才创建新 Thread。
 
-工具持续读取 stdout/stderr，避免子进程缓冲阻塞。stdout 中的 JSON 事件用于保存 Thread ID 并确认任务完成，`--output-last-message` 文件中的最终消息才会交还当前 LLM；stderr 仅被排空，不会写入电话回复或日志。进程内的 Codex 调用串行执行，排队期间也响应取消。
+扩展固定使用运行目录下的 `data/codex` 作为子进程工作目录和 App Server `cwd`。工具持续读取 stdout/stderr，避免子进程缓冲阻塞；stdout 的 JSON-RPC 事件用于立即保存 Thread ID、确认 Turn 完成并取得最终 assistant 文本，stderr 仅被排空，不会写入电话回复或日志。进程内的 Codex 调用串行执行，排队期间也响应取消。
 
 调用方法接受当前 Turn 的 `CancellationToken`：用户新说话、角色切换或服务停止会终止子进程；普通 SIP 挂断不会取消该 Turn。任务完成时，如果用户已经离线，回复会写为未读消息，并使用既有回拨/留言流程投递。
 

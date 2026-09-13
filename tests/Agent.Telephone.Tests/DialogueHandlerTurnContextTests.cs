@@ -21,7 +21,7 @@ public sealed class DialogueHandlerTurnContextTests
     }
 
     [Fact]
-    public void DialogueTurnContext_KeepsOnlyTheFirstNonEmptyDeferredHangupSegment()
+    public void DialogueTurnContext_KeepsTheEntireDeferredFarewell()
     {
         Type contextType = typeof(DialogueHandler).GetNestedType("DialogueTurnContext", BindingFlags.NonPublic)!;
         ConstructorInfo constructor = contextType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Single();
@@ -32,9 +32,9 @@ public sealed class DialogueHandlerTurnContextTests
         var empty = new OutSegment();
         empty.Initialize(" ", isFirst: false, isLast: false);
         var first = new OutSegment();
-        first.Initialize("好的，再见。", isFirst: false, isLast: false, paragraphId: "p1", sentenceId: "s1");
+        first.Initialize("好的", isFirst: false, isLast: false, paragraphId: "p1", sentenceId: "s1");
         var second = new OutSegment();
-        second.Initialize("有需要随时找我。", isFirst: false, isLast: true, paragraphId: "p2", sentenceId: "s2");
+        second.Initialize("再见", isFirst: false, isLast: true, paragraphId: "p2", sentenceId: "s2");
 
         capture.Invoke(context, [empty]);
         capture.Invoke(context, [first]);
@@ -43,7 +43,7 @@ public sealed class DialogueHandlerTurnContextTests
         object snapshot = deferredSegment.GetValue(context)
             ?? throw new InvalidOperationException("Expected a deferred hangup segment.");
         Type snapshotType = snapshot.GetType();
-        Assert.Equal("好的，再见。", snapshotType.GetProperty("Content")!.GetValue(snapshot));
+        Assert.Equal("好的。再见", snapshotType.GetProperty("Content")!.GetValue(snapshot));
         Assert.Equal("p1", snapshotType.GetProperty("ParagraphId")!.GetValue(snapshot));
         Assert.Equal("s1", snapshotType.GetProperty("SentenceId")!.GetValue(snapshot));
     }

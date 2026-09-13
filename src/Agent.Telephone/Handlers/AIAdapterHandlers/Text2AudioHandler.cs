@@ -163,7 +163,8 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             {
                 OutAudioSegment outAudioSegment = this._audioSegmentPool.Get();
                 Workflow<OutAudioSegment> nextWorkflow = this._audioWorkflowPool.Get();
-                outAudioSegment.Initialize(audioType: AudioType.TTS, content: sentence, isFirstSegment: isFirstSegment, isLastSegment: isLastSegment);
+                // 开始标记不能结束音频流；只有合成成功后的尾标记才能触发播放完成。
+                outAudioSegment.Initialize(audioType: AudioType.TTS, content: sentence, isFirstSegment: true);
 
                 nextWorkflow.Initialize(this.ActiveCallContext, outAudioSegment);
                 try

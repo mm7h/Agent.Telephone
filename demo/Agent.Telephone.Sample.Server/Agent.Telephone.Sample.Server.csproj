@@ -10,6 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Agent.Telephone.Abstractions\Agent.Telephone.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\Agent.Telephone\Agent.Telephone.csproj" />
+    <ProjectReference Include="..\..\src\codex\Agent.Telephone.Codex\Agent.Telephone.Codex.csproj" />
   </ItemGroup>
 
   <ItemGroup>

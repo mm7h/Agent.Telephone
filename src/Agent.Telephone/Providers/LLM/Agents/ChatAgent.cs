@@ -6,6 +6,7 @@ using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Common.Exceptions;
 using Agent.Telephone.Helpers;
+using Agent.Telephone.Providers.LLM.AIContextProviders;
 using Agent.Telephone.Providers.LLM.Contexts;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
@@ -19,6 +20,7 @@ namespace Agent.Telephone.Providers.LLM.Agents
     {
         private const string FUNCTION_CALL_INTENT_TYPE = "FunctionCall";
         private const string INTENT_LLM_INTENT_TYPE = "IntentLlm";
+        private const string HANGUP_FUNCTION_NAME = "HangupCurrentCall";
         private const string ENHANCED_CHAT_PROMPT = """
 请在遵守上方角色设定的前提下，额外严格遵守以下回复规则：
 1. 回复要像真实语音聊天，语气自然、简短、直接，第一句先回答核心内容，不要先寒暄，不要自我解释。
@@ -30,6 +32,7 @@ namespace Agent.Telephone.Providers.LLM.Agents
         private ChatClientAgent? _chatClientAgent;
 
         private AgentSession? _agentSession;
+        private SessionChatHistoryProvider? _chatHistoryProvider;
         private bool _allowFunctionCall;
 
         public ChatAgent(IServiceProvider serviceProvider, ILogger<ChatAgent> logger) : base(SubAgentNames.ChatAgent, serviceProvider, logger)
@@ -44,12 +47,17 @@ namespace Agent.Telephone.Providers.LLM.Agents
             try
             {
                 this.Prompt = agentBuildConfig.AgentSetting.Config.GetConfigValueOrDefault("Prompt")!;
+                this._chatHistoryProvider = agentBuildConfig.ChatHistoryProvider;
                 string? summaryMemory = agentBuildConfig.AgentSetting.Config.GetValueOrDefault("SummaryMemory");
                 string intentType = agentBuildConfig.AgentSetting.Config.GetConfigValueOrDefault("IntentType", "None");
                 this._allowFunctionCall = string.Compare(FUNCTION_CALL_INTENT_TYPE, intentType, StringComparison.OrdinalIgnoreCase) == 0;
                 bool exposeToolCapabilities = string.Compare(INTENT_LLM_INTENT_TYPE, intentType, StringComparison.OrdinalIgnoreCase) == 0;
 
                 string instructions = this.BuildInstructions(summaryMemory);
+                if (this._allowFunctionCall)
+                {
+                    instructions += "\n需要调用工具时直接调用，不要先生成受理、等待或告别语；执行前提示由系统负责。收到工具结果后直接播报结果或告别，不要重复等待提示，也不要说任务才刚开始。";
+                }
                 if (exposeToolCapabilities)
                 {
                     string toolDescriptions = FunctionToolHelper.BuildToolDescriptions(agentBuildConfig.SessionPrivateProvider.FunctionTools);
@@ -193,11 +201,12 @@ namespace Agent.Telephone.Providers.LLM.Agents
                 throw new InvalidOperationException("Chat agent is not built.");
             }
 
+            this._chatHistoryProvider?.RemoveIncompleteFunctionCalls();
+
             StringBuilder segmentResponse = new StringBuilder();
 
-            await foreach (AgentResponseUpdate update in this._chatClientAgent.RunStreamingAsync(userMessage, this._agentSession, cancellationToken: token))
+            await foreach (string content in this.StreamReplyTextAsync(userMessage, token))
             {
-                string content = update.Text ?? string.Empty;
                 string text = MarkdownCleaner.CleanMarkdown(Regex.Unescape(content));
                 segmentResponse.Append(text);
                 string currentSegment = segmentResponse.ToString();
@@ -223,6 +232,53 @@ namespace Agent.Telephone.Providers.LLM.Agents
                 string sentence = segmentResponse.ToString();
                 yield return sentence;
             }
+        }
+
+        private async IAsyncEnumerable<string> StreamReplyTextAsync(string userMessage, [EnumeratorCancellation] CancellationToken token)
+        {
+            StringBuilder reply = new();
+            bool calledHangup = false;
+            await foreach (AgentResponseUpdate update in this._chatClientAgent!.RunStreamingAsync(userMessage, this._agentSession, cancellationToken: token))
+            {
+                if (!this._allowFunctionCall)
+                {
+                    yield return update.Text ?? string.Empty;
+                    continue;
+                }
+
+                calledHangup |= update.Contents.OfType<FunctionCallContent>()
+                    .Any(call => string.Equals(call.Name, HANGUP_FUNCTION_NAME, StringComparison.OrdinalIgnoreCase));
+
+                // 自动调用会混入调用前文本；等工具边界确定后只播报最后一次结果之后的回复。
+                if (update.Contents.Any(static content => content is FunctionCallContent or FunctionResultContent))
+                {
+                    reply.Clear();
+                    continue;
+                }
+
+                if (update.Role != ChatRole.Tool)
+                {
+                    reply.Append(update.Text);
+                }
+            }
+
+            if (this._allowFunctionCall && reply.Length > 0)
+            {
+                string finalReply = reply.ToString();
+                yield return calledHangup ? RemoveRepeatedFarewell(finalReply) : finalReply;
+            }
+        }
+
+        private static string RemoveRepeatedFarewell(string reply)
+        {
+            if (reply.Length % 2 != 0)
+            {
+                return reply;
+            }
+
+            int halfLength = reply.Length / 2;
+            ReadOnlySpan<char> firstHalf = reply.AsSpan(0, halfLength);
+            return firstHalf.SequenceEqual(reply.AsSpan(halfLength)) ? firstHalf.ToString() : reply;
         }
 
         public override void Dispose()

@@ -155,7 +155,11 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
             if (!resultType.IsGenericType || resultType.GetGenericTypeDefinition() != typeof(FunctionReturn<>))
             {
                 string llmResponse = this.SerializeResultForLlm(result);
-                return new FunctionExecutionResult(detection.Function?.Name ?? string.Empty, llmResponse, ToolAction.Continue, detection.UserMessage);
+                return new FunctionExecutionResult(
+                    detection.Function?.Name ?? string.Empty,
+                    this.ResolveResponse(result) ?? llmResponse,
+                    this.ResolveDefaultAction(detection.Function?.Name),
+                    detection.UserMessage);
             }
 
             ToolAction action = this.ResolveToolAction(detection.Function?.Name, result);
@@ -189,7 +193,32 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
 
         private string? ResolveResponse(object functionReturn)
         {
+            if (functionReturn is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.Object)
+            {
+                if (jsonElement.TryGetProperty("response", out JsonElement response)
+                    && response.ValueKind == JsonValueKind.String)
+                {
+                    return response.GetString();
+                }
+                if (jsonElement.TryGetProperty("result", out JsonElement result))
+                {
+                    return result.ValueKind == JsonValueKind.String
+                        ? result.GetString()
+                        : result.GetRawText();
+                }
+            }
+
             return functionReturn.GetType().GetProperty("Response")?.GetValue(functionReturn) as string;
+        }
+
+        private ToolAction ResolveDefaultAction(string? functionName)
+        {
+            return !string.IsNullOrWhiteSpace(functionName)
+                && this._sessionPrivateProvider is not null
+                && this._sessionPrivateProvider.TryGetFunctionToolRegistration(functionName, out FunctionToolRegistration? registration)
+                && registration is not null
+                ? registration.DefaultAction
+                : ToolAction.Continue;
         }
 
         private string SerializeResultForLlm(object result)

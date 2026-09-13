@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Agent.Telephone\Agent.Telephone.csproj" />
+    <ProjectReference Include="..\..\src\codex\Agent.Telephone.Codex\Agent.Telephone.Codex.csproj" />
     <ProjectReference Include="..\..\demo\Agent.Telephone.Sample.Server\Agent.Telephone.Sample.Server.csproj" />
   </ItemGroup>
 

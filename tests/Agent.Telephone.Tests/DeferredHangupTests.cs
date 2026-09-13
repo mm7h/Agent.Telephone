@@ -10,11 +10,100 @@ using SIPSorcery.SIP;
 using SIPSorcery.SIP.App;
 using SIPSorceryMedia.Abstractions;
 using Xunit;
+using System.Reflection;
+using System.Threading.Channels;
+using Agent.Telephone.Common.Enums;
+using Microsoft.Extensions.ObjectPool;
 
 namespace Agent.Telephone.Tests;
 
 public sealed class DeferredHangupTests
 {
+    [Fact]
+    public async Task Farewell_DoesNotEmitTerminalMarkerBeforeSynthesisCompletesAsync()
+    {
+        using TestCallSession session = CreateCall();
+        Channel<Workflow<OutAudioSegment>> output = Channel.CreateUnbounded<Workflow<OutAudioSegment>>();
+        using Text2AudioHandler handler = new(
+            null!,
+            null!,
+            new DefaultObjectPool<Workflow<OutAudioSegment>>(new DefaultPooledObjectPolicy<Workflow<OutAudioSegment>>()),
+            new DefaultObjectPool<OutAudioSegment>(new DefaultPooledObjectPolicy<OutAudioSegment>()),
+            CreateConfig(),
+            NullLogger<Text2AudioHandler>.Instance)
+        {
+            ActiveCallContext = session.Call,
+            NextWriter = output.Writer,
+        };
+
+        handler.OnBeforeProcessing("好的。再见", isFirstSegment: true, isLastSegment: true);
+        Workflow<OutAudioSegment> start = await output.Reader.ReadAsync();
+        Assert.True(start.Data.IsFirstSegment);
+        Assert.False(start.Data.IsLastSegment);
+
+        handler.OnProcessing([0.1f, 0.2f], isFirstFrame: true, isLastFrame: true);
+        Workflow<OutAudioSegment> audio = await output.Reader.ReadAsync();
+        Assert.Equal(new[] { 0.1f, 0.2f }, audio.Data.AudioData);
+        Assert.False(audio.Data.IsLastSegment);
+        Assert.False(output.Reader.TryRead(out _));
+
+        handler.OnProcessed("好的。再见", true, true, TtsGenerateResult.Success);
+        Workflow<OutAudioSegment> end = await output.Reader.ReadAsync();
+        Assert.True(end.Data.IsLastSegment);
+        Assert.True(end.Data.IsLastFrame);
+    }
+
+    [Fact]
+    public async Task Farewell_WaitsForLastRtpPacketBeforeCompletingHangupAsync()
+    {
+        using TestCallSession session = CreateCall();
+        Assert.True(session.Call.TryBeginHangupAfterReply());
+        using AudioSendHandler handler = new(null!, null!, CreateConfig(), NullLogger<AudioSendHandler>.Instance)
+        {
+            ActiveCallContext = session.Call,
+        };
+        MethodInfo markPlayback = typeof(AudioSendHandler).GetMethod("MarkFinalPlaybackAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        MixedAudioPacket packet = new();
+        packet.Initialize([0.1f], isFirstFrame: true, isLastFrame: false);
+        Workflow<MixedAudioPacket> workflow = new();
+        workflow.Initialize(session.Call, packet);
+        await (Task)markPlayback.Invoke(handler, [workflow, true])!;
+        Assert.True(session.Call.IsHangupAfterReplyPending(session.Call.TurnId));
+
+        packet.Initialize([], isFirstFrame: false, isLastFrame: true);
+        await (Task)markPlayback.Invoke(handler, [workflow, true])!;
+        Assert.False(session.Call.IsHangupAfterReplyPending(session.Call.TurnId));
+    }
+
+    [Fact]
+    public async Task ToolPrompt_WaitsForPlaybackAndHonorsTurnCancellationAsync()
+    {
+        using TestCallSession session = CreateCall();
+        session.Call.AIAgentContext.SetPromptSynthesizer((text, paragraph, sentence, token) => Task.FromResult(true));
+        Task<bool> playing = session.Call.AIAgentContext.PlayToolExecutionPromptAsync("正在处理", CancellationToken.None);
+        Assert.True(session.Call.IsPromptPlaybackPending);
+        Assert.False(playing.IsCompleted);
+        session.Call.CompletePromptPlayback(fullyPlayed: true);
+        Assert.True(await playing);
+
+        using CancellationTokenSource cancellation = new();
+        playing = session.Call.AIAgentContext.PlayToolExecutionPromptAsync("正在处理", cancellation.Token);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => playing);
+        Assert.False(session.Call.IsPromptPlaybackPending);
+    }
+
+    [Fact]
+    public async Task ToolPrompt_CallEndedStopsPlaybackWithoutCancellingGenerationAsync()
+    {
+        using TestCallSession session = CreateCall();
+        session.Call.AIAgentContext.SetPromptSynthesizer((text, paragraph, sentence, token) => Task.FromResult(true));
+        Task<bool> playing = session.Call.AIAgentContext.PlayToolExecutionPromptAsync("正在处理", CancellationToken.None);
+        session.Call.Cancel();
+        Assert.False(await playing);
+        Assert.False(session.Call.IsPromptPlaybackPending);
+    }
+
     [Fact]
     public void HangupAfterReply_PausesInputAndOnlyCompletesTheMatchingTurn()
     {

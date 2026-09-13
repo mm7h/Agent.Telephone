@@ -204,6 +204,10 @@ namespace Agent.Telephone.Common.Contexts
 
         private void AddFunctionToolRegistrationCore(FunctionToolRegistration registration)
         {
+            if (!string.IsNullOrWhiteSpace(registration.PreExecutionPrompt))
+            {
+                registration.WithFunction(new PromptedAIFunction(registration.Function, this.DeviceId, this._activeCall));
+            }
             this.FunctionTools.Add(registration.Function);
             this._functionToolRegistrations[registration.Function.Name] = registration;
         }

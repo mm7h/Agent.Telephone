@@ -284,6 +284,7 @@ namespace Agent.Telephone.Management
         {
             DtmfKey dtmfKeys = methodMeta.Behavior?.DtmfKeys ?? DtmfKey.None;
             string? dtmfPrompt = methodMeta.Behavior?.DtmfPrompt;
+            string? preExecutionPrompt = methodMeta.Behavior?.PreExecutionPrompt;
             string description = methodMeta.Description ?? methodMeta.FunctionName;
             if (dtmfKeys != DtmfKey.None)
             {
@@ -320,7 +321,8 @@ namespace Agent.Telephone.Management
                 aiFunction,
                 metadata,
                 methodMeta.Behavior?.DefaultAction ?? ToolAction.Continue,
-                dtmfKeys);
+                dtmfKeys,
+                preExecutionPrompt);
         }
 
         private static string BuildDtmfToolInstruction()

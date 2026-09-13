@@ -53,6 +53,41 @@ namespace Agent.Telephone.Common.Contexts
             return true;
         }
 
+        public async Task<bool> PlayToolExecutionPromptAsync(string prompt, CancellationToken cancellationToken)
+        {
+            if (this._synthesizePrompt is null || this._activeCallContext.CallToken.IsCancellationRequested)
+            {
+                return false;
+            }
+
+            using CancellationTokenSource playbackCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, this._activeCallContext.CallToken);
+            playbackCts.CancelAfter(TimeSpan.FromSeconds(30));
+            Task<bool> playbackCompleted = this._activeCallContext.BeginPromptPlayback();
+            if (playbackCompleted.IsCompleted)
+            {
+                return false;
+            }
+
+            try
+            {
+                bool synthesized = await this._synthesizePrompt(
+                    prompt,
+                    $"tool-{this._activeCallContext.TurnId}",
+                    $"tool-{Guid.NewGuid():N}",
+                    playbackCts.Token);
+                return synthesized && await playbackCompleted.WaitAsync(playbackCts.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // 挂断或提示音超时只终止播放，后续长任务仍可生成回复。
+                return false;
+            }
+            finally
+            {
+                this._activeCallContext.CompletePromptPlayback(fullyPlayed: false);
+            }
+        }
+
         public async Task<DtmfInputResult> RequestDtmfInteractionAsync(
             string prompt,
             DtmfKey keys,
