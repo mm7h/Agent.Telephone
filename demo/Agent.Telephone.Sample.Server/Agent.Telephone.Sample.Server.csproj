@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Agent.Telephone.Abstractions\Agent.Telephone.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\Agent.Telephone\Agent.Telephone.csproj" />
+    <ProjectReference Include="..\..\src\codex\Agent.Telephone.Codex\Agent.Telephone.Codex.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Figgle.Fonts" Version="0.6.6" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <InternalsVisibleTo Include="Agent.Telephone.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="configs\config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="configs\AssistantPrompts\**\*.md">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

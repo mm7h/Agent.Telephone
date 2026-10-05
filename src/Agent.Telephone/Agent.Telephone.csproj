@@ -1,0 +1,47 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Version>0.1.0</Version>
+    <Authors>mm7h</Authors>
+    <Title>Agent.Telephone</Title>
+    <PackageIcon />
+    <Description>xiaozhi esp32的C#服务端，帮助你搭建属于自己的小智服务。Helps you build your own xiaozhi esp32 back-end service.</Description>
+    <RepositoryUrl>https://github.com/mm7h/Agent.Telephone</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/mm7h/Agent.Telephone</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Flurl.Http" Version="4.0.2" />
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.17.0" />
+    <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.17.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.7.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.ObjectPool.DependencyInjection" Version="10.9.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.5" />
+    <PackageReference Include="Serilog" Version="4.4.0" />
+    <PackageReference Include="Serilog.Extensions.Logging" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="SIPSorcery" Version="10.0.15" />
+    <PackageReference Include="Websocket.Client" Version="5.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Agent.Telephone.Abstractions\Agent.Telephone.Abstractions.csproj" />
+    <ProjectReference Include="..\media\Agent.Telephone.Abstractions\Agent.Telephone.Media.Abstractions.csproj" />
+    <ProjectReference Include="..\media\Agent.Telephone.Media\Agent.Telephone.Media.csproj" />
+    <ProjectReference Include="..\media\Agent.Telephone.Media.Resource\Agent.Telephone.Media.Resource.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Agent.Telephone.Tests" />
+  </ItemGroup>
+
+</Project>

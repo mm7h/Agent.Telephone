@@ -1,0 +1,329 @@
+{
+  "AuthEnabled": false,
+  "LogSetting": {
+    "LogLevel": "DEBUG",
+    "LogFilePath": "./logs/log.txt",
+    "OutputTemplate": "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u4}] {Message:l}{NewLine}{Exception}",
+    "RetainedFileCountLimit": 30
+  },
+  "SIPConfig": {
+    "IP": "0.0.0.0",
+    "Port": 5060,
+    "FFmpegPath": "./ffmpeg/",
+    "AgentInitializationTimeoutSeconds": 30,
+    "CallbackTimeoutSeconds": 30
+  },
+  "AssistantConfigs": [
+    {
+      "DialingNumber": "10000",
+      "Name": "智能服务前台",
+      // 电话接通后，随机选择一条作为开场白。
+      "HelloMessageTempletes": [
+        "您好，这里是智能服务前台。请问您想咨询日常问题，还是需要写作与语言方面的帮助？",
+        "您好，我是智能服务前台。请告诉我您的需求，我来为您安排合适的助理。",
+        "欢迎来电，这里是智能服务前台。您可以说说今天需要什么帮助。",
+        "您好，智能服务前台为您服务。您想进行通用咨询，还是处理写作、翻译或表达问题？",
+        "您好，感谢来电。请简要说一下您的需求，我会为您转接合适的助理。"
+      ],
+      "Prompt": "AssistantPrompts/10000.md", // 角色提示词文件
+      "VAD": "SileroNative",
+      "ASR": "SenseVoice",
+      "Intent": "FunctionCall",
+      "LLM": "Deepseek",
+      // LLM 响应超时时间，单位秒。0 不限时长，省略默认 30 秒。
+      "LLMResponseTimeoutSeconds": 30,
+      "TTS": "HuoshanBidirection",
+      "TTSSettings": [
+        // 可以设置多种音色
+        // 这里面的配置会覆盖ModelConfig中TTS的任意同键名的配置项
+        {
+          "Speaker": "zh_female_cancan_mars_bigtts"
+        },
+        {
+          "Speaker": "zh_male_beijingxiaoye_moon_bigtts"
+        },
+        {
+          "Speaker": "zh_female_wenrouxiaoya_moon_bigtts"
+        },
+        {
+          "Speaker": "zh_female_daimengchuanmei_moon_bigtts"
+        }
+      ],
+      "AllowedTools": [
+        // 允许使用的工具列表，工具名称必须与ToolConfig中定义的名称一致
+        "SwitchAssistantAsync",
+        "HangupCurrentCall"
+      ]
+    },
+    {
+      "DialingNumber": "10086",
+      "Name": "通用问答助理",
+      "HelloMessageTempletes": [
+        "您好，这里是通用问答助理。今天有什么问题想一起聊聊？",
+        "您好，我是通用问答助理。无论是生活疑问还是思路梳理，都可以告诉我。",
+        "欢迎来电，通用问答助理为您服务。请问您想咨询什么？",
+        "您好，有什么想了解、分析或一起想想的问题吗？",
+        "您好，我是您的通用问答助理。请直接说说您现在最需要解决的事。"
+      ],
+      "Prompt": "AssistantPrompts/10086.md",
+      "VAD": "SileroNative",
+      "ASR": "SenseVoice",
+      "Intent": "FunctionCall",
+      "LLM": "Deepseek",
+      // LLM 响应超时时间，单位秒。0 不限时长，省略默认 30 秒。
+      "LLMResponseTimeoutSeconds": 30,
+      "TTS": "HuoshanBidirection",
+      "TTSSettings": [
+        {
+          "Speaker": "zh_female_wanwanxiaohe_moon_bigtts"
+        },
+        {
+          "Speaker": "zh_female_wanqudashu_moon_bigtts"
+        }
+      ],
+      "AllowedTools": [
+        "GetWeatherInfo",
+        "HangupCurrentCall"
+      ]
+    },
+    {
+      "DialingNumber": "10085",
+      "Name": "写作与语言助理",
+      "HelloMessageTempletes": [
+        "您好，这里是写作与语言助理。您想起草、润色、改写还是翻译一段文字？",
+        "您好，我是写作与语言助理。请告诉我文字的用途，我来帮您组织表达。",
+        "欢迎来电，写作与语言助理为您服务。您今天想优化哪一段文字？",
+        "您好，需要写文案、改措辞、做翻译，还是调整语气吗？",
+        "您好，我可以帮您把想法写得更清楚自然。请说说您要表达什么。"
+      ],
+      "Prompt": "AssistantPrompts/10085.md",
+      "VAD": "SileroNative",
+      "ASR": "SenseVoice",
+      "Intent": "IntentLlm", // 如果要使用按键回馈来触发自定义function tool，则必须使用`FunctionCall`类型
+      "LLM": "Deepseek",
+      // LLM 响应超时时间，单位秒。0 不限时长，省略默认 30 秒。
+      "LLMResponseTimeoutSeconds": 30,
+      "TTS": "HuoshanBidirection",
+      "TTSSettings": [
+        {
+          "Speaker": "zh_female_daimengchuanmei_moon_bigtts"
+        }
+      ],
+      "AllowedTools": [
+        "HangupCurrentCall"
+      ]
+    },
+    {
+      "DialingNumber": "10088",
+      "Name": "Codex 任务助理",
+      "HelloMessageTempletes": [
+        "您好，这里是 Codex 任务助理。请说明希望我执行的任务；任务可能需要一些时间，您也可以挂断后等待回拨。"
+      ],
+      "Prompt": "AssistantPrompts/10088.md",
+      "VAD": "SileroNative",
+      "ASR": "SenseVoice",
+      "Intent": "FunctionCall",
+      "LLM": "Deepseek",
+      // 每轮对话包含 Codex 执行，最多等待 30 分钟；0 不限时长，省略则沿用模型配置（默认 30 秒）。
+      "LLMResponseTimeoutSeconds": 1800,
+      "TTS": "HuoshanBidirection",
+      "TTSSettings": [
+        {
+          "Speaker": "zh_female_wanwanxiaohe_moon_bigtts"
+        }
+      ],
+      "AllowedTools": [
+        "RunCodexTaskAsync",
+        "HangupCurrentCall"
+      ]
+    }
+  ],
+  "ModelConfig": {
+    "SelectedDefaultSettings": {
+      "VAD": "SileroNative",
+      "ASR": "SenseVoice",
+      "TTS": "HuoshanBidirection"
+    },
+    "ConfiguredSettings": {
+      "VAD": {
+        "Silero": {
+          "Threshold": 0.5,
+          "SilenceThresholdSecond": 0.7,
+          "MinSpeechDurationSecond": 0.5,
+          "MaxSpeechDurationSecond": 60,
+          // 间隔多久没有检测到声音就断开连接，单位毫秒
+          "CloseConnectionNoVoiceTime": 120000
+        },
+        "SileroNative": {
+          "SilenceThresholdSecond": 0.7,
+          "Threshold": 0.5,
+          "ThresholdLow": 0.2,
+          "CloseConnectionNoVoiceTime": 120000
+        }
+      },
+      "ASR": {
+        "SenseVoice": {
+          "UseInverseTextNormalization": 1,
+          "DecodingMethod": "greedy_search",
+          // MaxBatchSize和BatchWaitTimeMs两个参数谁先满足就会触发ASR识别
+          "MaxBatchSize": 10, //对于批量ASR识别，每轮处理周期最大能够处理的音频数量
+          "BatchWaitTimeMs": 50, //对于批量ASR识别，每轮处理周期最大的等待时间，单位毫秒
+          "FileSavingOption": {
+            "SaveFile": true,
+            "SavePath": "./data/asr-cache",
+            "Format": "mp3"
+          }
+        },
+        "Paraformer": {
+          "FileSavingOption": {
+            "SaveFile": true
+            // 未设置的话，剩下的属性将保持如下默认值
+            /*
+          "SavePath": "./data/audio-cache",
+          "Format": "wav"
+          */
+          }
+        },
+        "AliyunRealtime": {
+          // 阿里云实时 ASR 使用 16 kHz、单声道、16-bit PCM，支持边说边传。
+          "ApiKey": "to your aliyun api key",
+          "ModelName": "qwen-audio-3.0-asr-flash-streaming",
+          "Region": "cn-beijing",
+          // 可选：业务空间 ID。Endpoint 优先，留空则使用共享 DashScope 地址。
+          "WorkspaceId": "",
+          "SegmentDurationMs": 100,
+          "LanguageHints": "zh,en",
+          "ConnectionTimeoutSeconds": 5,
+          "ResponseTimeoutSeconds": 15
+        }
+      },
+      "LLM": {
+        "Chatglm": {
+          "BaseUrl": "https://open.bigmodel.cn/api/paas/v4/",
+          "ApiKey": "to your llm api key",
+          "ModelName": "glm-4.7-flash"
+        },
+        "Deepseek": {
+          "BaseUrl": "https://api.deepseek.com",
+          "ApiKey": "to your llm api key",
+          "ModelName": "deepseek-v4-flash"
+        },
+        "Doubao": {
+          "BaseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+          "ApiKey": "to your llm api key",
+          "ModelName": "doubao-1-5-pro-32k-250115"
+        },
+        "Qwen": {
+          "BaseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "ApiKey": "to your llm api key",
+          "ModelName": "qwen3.7-plus"
+        }
+      },
+      "TTS": {
+        "Kokoro": {
+          "Lexicons": "./lexicon/lexicon-zh.txt,./lexicon/lexicon-us-en.txt",
+          "FileSavingOption": {
+            "SaveFile": true,
+            "SavePath": "./data/tts-cache",
+            "Format": "mp3"
+          }
+        },
+        "HuoshanBidirection": {
+          "AppId": "to your api id",
+          "AccessToken": "to your access token",
+          "ResourceId": "volc.service_type.10029",
+          "SpeechRate": 0,
+          "LoudnessRate": 0,
+          "FileSavingOption": {
+            "SaveFile": true,
+            "SavePath": "./data/tts-cache",
+            "Format": "mp3"
+          }
+        },
+        "AliyunRealtimeTTS": {
+          // Qwen-Audio-TTS 与 CosyVoice 共用此实时 WebSocket Provider。
+          "ApiKey": "to your aliyun api key",
+          "ModelName": "cosyvoice-v3-flash",
+          "Voice": "longanfengyue",
+          "Region": "cn-beijing",
+          // 可选：业务空间 ID。Endpoint 优先，留空则使用共享 DashScope 地址。
+          "WorkspaceId": "",
+          "Format": "pcm",
+          "SampleRate": 24000,
+          "Volume": 50,
+          "Rate": 1.0,
+          "Pitch": 1.0,
+          "LanguageHints": "zh",
+          "Instruction": "",
+          "ConnectionTimeoutSeconds": 5,
+          "ResponseTimeoutSeconds": 30,
+          "FileSavingOption": {
+            "SaveFile": true,
+            "SavePath": "./data/tts-cache",
+            "Format": "mp3"
+          }
+        },
+        "AliyunHttp": {
+          // 非实时 HTTP TTS：false 下载完整音频，true 使用 SSE 分块返回 PCM。
+          "ApiKey": "to your aliyun api key",
+          "WorkspaceId": "to your workspace id",
+          "ModelName": "cosyvoice-v3-flash",
+          "Voice": "longanfengyue",
+          "Streaming": false,
+          "Format": "pcm",
+          "SampleRate": 24000,
+          "Volume": 50,
+          "Rate": 1.0,
+          "Pitch": 1.0,
+          "LanguageHints": "zh",
+          "Instruction": "",
+          "ResponseTimeoutSeconds": 120,
+          "FileSavingOption": {
+            "SaveFile": true,
+            "SavePath": "./data/tts-cache",
+            "Format": "mp3"
+          }
+        },
+        "HuoshanHttp": {
+          "AppId": "to your api id",
+          "AccessToken": "to your access token",
+          "Cluster": "volcano_tts",
+          "Speaker": "zh_female_cancan_mars_bigtts",
+          "SpeedRatio": 1.0,
+          "VolumeRatio": 1.0,
+          "PitchRatio": 1.0,
+          "FileSavingOption": {
+            "SaveFile": true,
+            "SavePath": "./data/tts-cache",
+            "Format": "mp3"
+          }
+        },
+        "HuoshanHttpV3": {
+          "AppId": "to your api id",
+          "AccessToken": "to your access token",
+          "ResourceId": "volc.service_type.10029",
+          "Speaker": "zh_female_cancan_mars_bigtts",
+          "SpeechRate": 0,
+          "LoudnessRate": 0,
+          "FileSavingOption": {
+            "SaveFile": true,
+            "SavePath": "./data/tts-cache",
+            "Format": "mp3"
+          }
+        }
+      },
+      "Intent": {
+        "None": {
+          "Type": "None"
+        },
+        "IntentLlm": {
+          "Type": "IntentLlm",
+          "LLM": "Qwen"
+        },
+        "FunctionCall": {
+          "Type": "FunctionCall"
+        }
+      }
+    }
+  }
+}

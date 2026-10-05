@@ -1,0 +1,11 @@
+/.vscode/
+/.github/
+/.vs/
+*.user
+*.pubxml
+*.vssscc
+*.vspscc
+
+**/[Bb][Ii][Nn]/
+**/[Oo][Bb][Jj]/
+/AGENTS.md
