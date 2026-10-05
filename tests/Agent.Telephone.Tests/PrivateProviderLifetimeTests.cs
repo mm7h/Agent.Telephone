@@ -242,7 +242,11 @@ public sealed class PrivateProviderLifetimeTests
     private sealed class TrackingLlm : ILlm
     {
         public List<string> Events { get; } = [];
+        public string ProviderType => "llm";
+        public string ModelName => nameof(TrackingLlm);
+        public bool IsSherpaModel => false;
         public bool Build(Agent.Telephone.Common.Configs.LLMBuildConfig settings) => true;
+        public void RegisterDevice(ActiveCallContext activeCall) { }
         public void RegisterDevice(ActiveCallContext activeCall, ILlmEventCallback callback) { }
         public void UnregisterDevice(ActiveCallContext activeCall) => this.Events.Add("unregister");
         public Task StartDialogueAsync(long turnId, string userMessage, CancellationToken token) => Task.CompletedTask;
