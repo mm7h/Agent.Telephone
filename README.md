@@ -113,7 +113,7 @@
 
 #### 2. 下载模型文件和FFmpeg
 
-当前项目是从 [XiaoZhi.Net] 衍生而来，你可以从 [XiaoZhi.Net Resource Files](https://github.com/mm7h/XiaoZhi.Net/releases#release-resources) 下载 FFmpeg 与 ONNX 模型资源。
+当前项目是从 [XiaoZhi.Net](https://github.com/mm7h/XiaoZhi.Net) 衍生而来，你可以从 [XiaoZhi.Net Resource Files](https://github.com/mm7h/XiaoZhi.Net/releases#release-resources) 下载 FFmpeg 与 ONNX 模型资源。
 根据项目目录结构将资源文件放到对应的目录中。
 
 #### 3. 项目构建与运行
@@ -180,9 +180,9 @@ LLM 通过 OpenAI 兼容 API 接入，示例配置包含以下平台：
 | 能力 | 平台 / 模型 | 备注 |
 | :---: | --- | --- |
 | VAD | Silero、Silero Native | 分别基于 sherpa-onnx 与 ONNX Runtime。 |
-| ASR | SenseVoice、Paraformer | 基于 sherpa-onnx 的本地语音识别。 |
+| ASR | SenseVoice、Paraformer、阿里云流式ASR | 基于 sherpa-onnx 的本地语音识别。 |
 | LLM | 智谱 ChatGLM、DeepSeek、Doubao、Qwen | 需要配置好Api Key |
-| TTS | Kokoro、火山引擎 | sherpa-onnx 需要配置本地好本地模型 |
+| TTS | Kokoro、火山引擎、阿里云 | sherpa-onnx 需要配置本地好本地模型 |
 | Intent | None、IntentLlm、FunctionCall | 可关闭意图层、使用独立 LLM，或启用工具调用。 |
 
 ## 六、项目原理 🧭
