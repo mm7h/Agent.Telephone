@@ -59,6 +59,7 @@ namespace Agent.Telephone.Providers.CallControl
                 return Task.FromResult(validationSwitchResult);
             }
 
+            targetAssistantNumber = validationSwitchResult.TargetAssistantNumber;
             if (!call.UserAgent.IsCallActive)
             {
                 this.Logger.LogWarning(
@@ -66,7 +67,7 @@ namespace Agent.Telephone.Providers.CallControl
                     targetAssistantNumber);
                 return Task.FromResult(new AssistantSwitchResult(
                     AssistantSwitchStatus.CallEnded,
-                    targetAssistantNumber.Trim(),
+                    targetAssistantNumber,
                     "当前通话已经结束。"));
             }
 
@@ -74,7 +75,7 @@ namespace Agent.Telephone.Providers.CallControl
             {
                 return Task.FromResult(new AssistantSwitchResult(
                     AssistantSwitchStatus.Failed,
-                    targetAssistantNumber.Trim(),
+                    targetAssistantNumber,
                     "角色切换请求已取消。"));
             }
 

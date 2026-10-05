@@ -287,10 +287,9 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
         }
 
-        public override void Dispose()
+        protected override void DisposeResources()
         {
             this._synthesisLock.Dispose();
-            base.Dispose();
         }
 
     }

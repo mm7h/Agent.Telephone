@@ -124,6 +124,7 @@ public sealed class ProviderCallContextTests
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow.AddMinutes(5));
         return new DeviceContext(
+            TestServices.ScopeFactory,
             transport,
             registration,
             [new AssistantConfig { DialingNumber = "10000" }]);

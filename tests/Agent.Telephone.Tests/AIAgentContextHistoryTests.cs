@@ -19,6 +19,7 @@ public sealed class AIAgentContextHistoryTests
     {
         using SIPTransport transport = new();
         DeviceContext device = new(
+            TestServices.ScopeFactory,
             transport,
             this.CreateRegisterRequest(),
             SIPURI.ParseSIPURI("sip:1001@192.0.2.10:5060"),

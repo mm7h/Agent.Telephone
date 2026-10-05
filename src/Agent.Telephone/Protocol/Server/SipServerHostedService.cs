@@ -14,6 +14,7 @@ namespace Agent.Telephone.Protocol.Server
         private readonly SIPTransport _sipTransport;
         private readonly DeviceContainerMiddleware _deviceContainerMiddleware;
         private readonly DeviceContextManager _deviceManager;
+        private readonly FunctionToolManager _functionToolManager;
         private readonly ILogger<SipServerHostedService> _logger;
 
         public SipServerHostedService(
@@ -21,12 +22,14 @@ namespace Agent.Telephone.Protocol.Server
             SIPTransport sipTransport,
             DeviceContainerMiddleware deviceContainerMiddleware,
             DeviceContextManager deviceManager,
+            FunctionToolManager functionToolManager,
             ILogger<SipServerHostedService> logger)
         {
             this._sipConfig = sipConfig;
             this._sipTransport = sipTransport;
             this._deviceContainerMiddleware = deviceContainerMiddleware;
             this._deviceManager = deviceManager;
+            this._functionToolManager = functionToolManager;
             this._logger = logger;
         }
         public async Task StartAsync(CancellationToken cancellationToken)
@@ -49,17 +52,33 @@ namespace Agent.Telephone.Protocol.Server
 
         }
 
-        public Task StopAsync(CancellationToken cancellationToken)
+        public async Task StopAsync(CancellationToken cancellationToken)
         {
             this._logger.LogInformation("正在停止 SIP 服务...");
 
             this._deviceContainerMiddleware.UnsubscribeSIPTransportEvents(this._sipTransport);
 
-            this._sipTransport.Shutdown();
+            try
+            {
+                try
+                {
+                    await this._deviceManager.StopAsync(cancellationToken);
+                }
+                finally
+                {
+                    if (!cancellationToken.IsCancellationRequested)
+                    {
+                        await this._functionToolManager.StopAsync().WaitAsync(cancellationToken);
+                    }
+                }
+            }
+            finally
+            {
+                this._sipTransport.Shutdown();
+            }
 
             this._logger.LogInformation("已停止 SIP 服务");
 
-            return Task.CompletedTask;
         }
     }
 }

@@ -228,8 +228,6 @@ namespace Agent.Telephone.Providers.AudioProcessor
         {
             this.ClearAllBuffers();
             this._audioMixer.OnMixedAudioDataAvailable -= this.FireOnMixedAudioData;
-            this._audioMixer.Dispose();
-            this._audioSubtitleRegister.Dispose();
         }
 
         private void FireOnMixedAudioData(float[] audioPcmData, bool isFirst, bool isLast, string? sentenceId)

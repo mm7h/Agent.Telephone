@@ -72,14 +72,21 @@ namespace Agent.Telephone.Management
                 return false;
             }
 
-            ActiveCallHandler? activeCallHandler = answerRequest is null ? null : this.ServiceProvider.GetRequiredService<ActiveCallHandler>();
-            var rtp = this.ServiceProvider.GetRequiredService<RTPHandler>();
-            var audioReceived = this.ServiceProvider.GetRequiredService<AudioReceivedHandler>();
-            var audio2Text = this.ServiceProvider.GetRequiredService<Audio2TextHandler>();
-            var dialogue = this.ServiceProvider.GetRequiredService<DialogueHandler>();
-            var text2Audio = this.ServiceProvider.GetRequiredService<Text2AudioHandler>();
-            var audioProcessor = this.ServiceProvider.GetRequiredService<AudioProcessorHandler>();
-            var audioSend = this.ServiceProvider.GetRequiredService<AudioSendHandler>();
+            if (!activeCallContext.TryAcquireUse(out IDisposable? lease) || lease is null)
+            {
+                return false;
+            }
+            using IDisposable callLease = lease;
+            AIAgentContext agentContext = activeCallContext.AIAgentContext;
+            IServiceProvider serviceProvider = agentContext.ServiceProvider;
+            ActiveCallHandler? activeCallHandler = answerRequest is null ? null : activeCallContext.ServiceProvider.GetRequiredService<ActiveCallHandler>();
+            var rtp = serviceProvider.GetRequiredService<RTPHandler>();
+            var audioReceived = serviceProvider.GetRequiredService<AudioReceivedHandler>();
+            var audio2Text = serviceProvider.GetRequiredService<Audio2TextHandler>();
+            var dialogue = serviceProvider.GetRequiredService<DialogueHandler>();
+            var text2Audio = serviceProvider.GetRequiredService<Text2AudioHandler>();
+            var audioProcessor = serviceProvider.GetRequiredService<AudioProcessorHandler>();
+            var audioSend = serviceProvider.GetRequiredService<AudioSendHandler>();
 
             IDictionary<string, IHandler> handlerContainer = new Dictionary<string, IHandler>
             {
@@ -108,8 +115,6 @@ namespace Agent.Telephone.Management
                         activeCallHandler.Dispose();
                         return false;
                     }
-
-                    activeCallContext.RegisterCallOwnedResource(activeCallHandler);
                 }
 
                 foreach (IHandler handler in handlerContainer.Values)
@@ -133,19 +138,19 @@ namespace Agent.Telephone.Management
                 this.BuildHandlersWorkflow(text2Audio, audioProcessor, completeWriters, handlerTasks);
                 this.BuildHandlersWorkflow(audioProcessor, audioSend, completeWriters, handlerTasks);
 
-                activeCallContext.AIAgentContext.HandlerPipeline.InitHandlerPipeline(
+                agentContext.HandlerPipeline.InitHandlerPipeline(
                     handlerContainer.Values.ToArray(),
                     completeWriters,
                     handlerTasks,
                     this.Logger);
-                activeCallContext.AIAgentContext.SetPromptSynthesizer(text2Audio.SynthesizePromptAsync);
+                agentContext.SetPromptSynthesizer(text2Audio.SynthesizePromptAsync);
                 pipelineInitialized = true;
             }
             catch (Exception exception)
             {
                 if (pipelineInitialized)
                 {
-                    activeCallContext.AIAgentContext.HandlerPipeline.Dispose();
+                    await agentContext.HandlerPipeline.DisposeAsync();
                 }
                 else
                 {
@@ -156,7 +161,7 @@ namespace Agent.Telephone.Management
 
                     try
                     {
-                        Task.WhenAll(handlerTasks).GetAwaiter().GetResult();
+                        await Task.WhenAll(handlerTasks);
                     }
                     catch (Exception handlerException)
                     {
@@ -182,7 +187,7 @@ namespace Agent.Telephone.Management
             {
                 if (!string.IsNullOrWhiteSpace(callbackMessageId))
                 {
-                    IOfflineDialogue callbackOfflineDialogue = activeCallContext.AIAgentContext.PrivateProvider.OfflineDialogue
+                    IOfflineDialogue callbackOfflineDialogue = agentContext.PrivateProvider.OfflineDialogue
                         ?? throw new InvalidOperationException("The offline dialogue provider is not initialized.");
                     await callbackOfflineDialogue.PlayAssistantMessageAsync(
                         activeCallContext,
@@ -199,7 +204,7 @@ namespace Agent.Telephone.Management
                 return false;
             }
 
-            IOfflineDialogue offlineDialogue = activeCallContext.AIAgentContext.PrivateProvider.OfflineDialogue
+            IOfflineDialogue offlineDialogue = agentContext.PrivateProvider.OfflineDialogue
                 ?? throw new InvalidOperationException("The offline dialogue provider is not initialized.");
 
             await offlineDialogue.StartInitialCallFlowAsync(activeCallContext, text2Audio.SynthesizePromptAsync, activeCallContext.CallToken);
@@ -228,7 +233,7 @@ namespace Agent.Telephone.Management
             next.PreviousReader = channel.Reader;
 
             completeWriters.Add(() => channel.Writer.TryComplete());
-            handlerTasks.Add(Task.Run(next.HandleAsync));
+            handlerTasks.Add(next.HandleAsync());
             this.Logger?.LogDebug("已构建处理程序工作流，上一步：{previous} -> 下一步：{next}", previous.GetType().Name, next.GetType().Name);
         }
 

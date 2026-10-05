@@ -372,17 +372,5 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
         private sealed record DeferredHangupSegment(string Content, string? ParagraphId, string? SentenceId);
 
-        public override void Dispose()
-        {
-            if (this._llm is not null)
-            {
-                this._llm.UnregisterDevice(this.ActiveCallContext);
-            }
-            if (this._offlineDialogue is not null)
-            {
-                this._offlineDialogue.UnregisterDevice(this.ActiveCallContext);
-            }
-            base.Dispose();
-        }
     }
 }

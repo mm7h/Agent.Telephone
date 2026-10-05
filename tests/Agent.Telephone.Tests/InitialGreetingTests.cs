@@ -84,6 +84,7 @@ public sealed class InitialGreetingTests
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow.AddMinutes(5));
         using var device = new DeviceContext(
+            TestServices.ScopeFactory,
             transport,
             registration,
             [new AssistantConfig { DialingNumber = "10000" }]);
@@ -119,6 +120,7 @@ public sealed class InitialGreetingTests
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow.AddMinutes(5));
         using var device = new DeviceContext(
+            TestServices.ScopeFactory,
             transport,
             registration,
             [new AssistantConfig { DialingNumber = "10000" }]);

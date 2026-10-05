@@ -224,7 +224,7 @@ flowchart LR
 
 本项目希望为 `.NET` 生态提供一个可运行、可扩展的电话语音 Agent 实现。
 
-一切的灵感来源于抖音 **@硅忆说** 在7月6日发布的短视频。
+一切的灵感来源于抖音 **[@硅忆说](https://www.douyin.com/user/MS4wLjABAAAAjtpFpnADSI0CwjwJgEKofSHcs_h-vbDvwhqZYWydddR34msZZpSIZU9u5SPGLnbL?from_tab_name=main&modal_id=7659254158733610303)** 在7月6日发布的短视频。
 
 如果你在部署、硬件兼容或二次开发中遇到问题，欢迎提交 Issues 和 Pull Requests。
 

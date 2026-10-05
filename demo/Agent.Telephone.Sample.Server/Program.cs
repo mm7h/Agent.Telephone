@@ -8,8 +8,9 @@ using Agent.Telephone.Sample.Server.MessageStore;
 using Figgle.Fonts;
 using Microsoft.Extensions.Hosting;
 
-
+#if DEBUG
 Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Development");
+#endif
 
 IHost? serverHost = null;
 // 获取服务引擎构建器
@@ -79,13 +80,12 @@ catch (Exception ex)
 }
 finally
 {
-    if (serverHost is not null)
-    {
-        await serverHost.StopAsync();
-    }
     Console.WriteLine("The server stopped.");
-    Console.WriteLine("Press any key to exit...");
-    Console.ReadKey();
+    if (!Console.IsInputRedirected)
+    {
+        Console.WriteLine("Press any key to exit...");
+        Console.ReadKey();
+    }
 }
 
 #region Lenient String Converter

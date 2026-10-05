@@ -16,7 +16,7 @@ namespace Agent.Telephone.Tests;
 public sealed class PrivateProviderLifetimeTests
 {
     [Fact]
-    public void Dispose_UnregistersAndDisposesSessionProvidersExactlyOnce()
+    public void Dispose_UnregistersSessionProvidersWithoutDisposingScopeOwnedInstances()
     {
         using TestCallSession session = CreateCall();
         var audioProcessor = new TrackingProvider("audio-processor", isSherpaModel: false);
@@ -48,7 +48,7 @@ public sealed class PrivateProviderLifetimeTests
         AssertProviderReleased(offlineDialogue);
         AssertProviderReleased(callControl);
         AssertProviderReleased(dtmfInput);
-        Assert.Equal(["unregister", "dispose"], llm.Events);
+        Assert.Equal(["unregister"], llm.Events);
     }
 
     [Fact]
@@ -64,15 +64,33 @@ public sealed class PrivateProviderLifetimeTests
         Assert.Equal(["unregister"], sherpaTts.Events);
     }
 
+    [Fact]
+    public async Task DisposeAsync_ContinuesUnregisteringAfterOneProviderFailsAsync()
+    {
+        using TestCallSession session = CreateCall();
+        TrackingProvider audioProcessor = new("audio-processor", false) { FailUnregister = true };
+        TrackingProvider vad = new("vad", true);
+        PrivateProvider providers = session.Call.AIAgentContext.PrivateProvider;
+        providers.SetAudioProcessor(audioProcessor);
+        providers.SetVad(vad);
+
+        await Assert.ThrowsAsync<AggregateException>(() => providers.DisposeAsync());
+        AssertProviderReleased(audioProcessor);
+        AssertProviderReleased(vad);
+        await providers.DisposeAsync();
+        AssertProviderReleased(vad);
+    }
+
     private static void AssertProviderReleased(TrackingProvider provider)
     {
-        Assert.Equal(["unregister", "dispose"], provider.Events);
+        Assert.Equal(["unregister"], provider.Events);
     }
 
     private static TestCallSession CreateCall()
     {
         SIPTransport transport = new();
         DeviceContext device = new(
+            TestServices.ScopeFactory,
             transport,
             CreateRegisterRequest(),
             SIPURI.ParseSIPURI("sip:1001@192.0.2.10:5060"),
@@ -123,6 +141,7 @@ public sealed class PrivateProviderLifetimeTests
             this.IsSherpaModel = isSherpaModel;
         }
 
+        public bool FailUnregister { get; init; }
         public List<string> Events { get; } = [];
         public string ProviderType { get; }
         public string ModelName => nameof(TrackingProvider);
@@ -140,7 +159,14 @@ public sealed class PrivateProviderLifetimeTests
         public void RegisterDevice(ActiveCallContext activeCall, Agent.Telephone.Providers.VAD.IVadEventCallback callback) { }
         public void RegisterDevice(ActiveCallContext activeCall, Agent.Telephone.Providers.ASR.IAsrEventCallback callback) { }
         public void RegisterDevice(ActiveCallContext activeCall, Agent.Telephone.Providers.TTS.ITtsEventCallback callback) { }
-        public void UnregisterDevice(ActiveCallContext activeCall) => this.Events.Add("unregister");
+        public void UnregisterDevice(ActiveCallContext activeCall)
+        {
+            this.Events.Add("unregister");
+            if (this.FailUnregister)
+            {
+                throw new InvalidOperationException("Unregister failed.");
+            }
+        }
         public void Dispose() => this.Events.Add("dispose");
         public Task<float[]> DecodeAsync(byte[] encodedData, AudioFormat format, CancellationToken token) => Task.FromResult(Array.Empty<float>());
         public Task<byte[]> EncodeAsync(float[] pcmData, AudioFormat format, CancellationToken token) => Task.FromResult(Array.Empty<byte>());

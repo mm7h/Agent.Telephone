@@ -72,15 +72,33 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
 
         public async Task HandleAsync()
         {
-            await foreach (var workflow in this.PreviousReader.ReadAllAsync())
+            try
             {
+                await foreach (var workflow in this.PreviousReader.ReadAllAsync())
+                {
+                    try
+                    {
+                        await this.HandleAsync(workflow);
+                    }
+                    finally
+                    {
+                        this._rtpPacketWorkflowPool.Return(workflow);
+                    }
+                }
+            }
+            finally
+            {
+                Task streamingOperations;
+                lock (this._streamingQueueGate)
+                {
+                    streamingOperations = this._streamingOperationTail;
+                }
                 try
                 {
-                    await this.HandleAsync(workflow);
+                    await streamingOperations;
                 }
-                finally
+                catch (OperationCanceledException)
                 {
-                    this._rtpPacketWorkflowPool.Return(workflow);
                 }
             }
         }
@@ -402,9 +420,8 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                 TaskScheduler.Default);
         }
 
-        public override void Dispose()
+        protected override void DisposeResources()
         {
-            base.Dispose();
         }
 
     }

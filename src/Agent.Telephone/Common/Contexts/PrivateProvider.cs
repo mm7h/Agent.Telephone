@@ -13,7 +13,7 @@ namespace Agent.Telephone.Common.Contexts
         private readonly List<PrivateFunctionTool> _privateFunctionTools;
         private readonly object _lifetimeLock = new();
         private ActiveCallContext? _activeCall;
-        private IDisposable? _privateFunctionToolLifetime;
+        private IAsyncDisposable? _privateFunctionToolLifetime;
         private bool _disposed;
 
         public PrivateProvider(string deviceId)
@@ -72,27 +72,18 @@ namespace Agent.Telephone.Common.Contexts
             }
         }
 
-        public void SetPrivateFunctionToolLifetime(IDisposable lifetime)
+        public void SetPrivateFunctionToolLifetime(IAsyncDisposable lifetime)
         {
             ArgumentNullException.ThrowIfNull(lifetime);
 
             lock (this._lifetimeLock)
             {
-                try
+                this.ThrowIfDisposed();
+                if (this._privateFunctionToolLifetime is not null)
                 {
-                    this.ThrowIfDisposed();
-                    if (this._privateFunctionToolLifetime is not null)
-                    {
-                        throw new InvalidOperationException("The private function tool lifetime has already been registered.");
-                    }
-
-                    this._privateFunctionToolLifetime = lifetime;
+                    throw new InvalidOperationException("The private function tool lifetime has already been registered.");
                 }
-                catch
-                {
-                    lifetime.Dispose();
-                    throw;
-                }
+                this._privateFunctionToolLifetime = lifetime;
             }
         }
 
@@ -110,10 +101,10 @@ namespace Agent.Telephone.Common.Contexts
             return this._functionToolRegistrations.TryGetValue(functionName, out registration);
         }
 
-        public void Dispose()
+        public async Task DisposeAsync()
         {
             ActiveCallContext? activeCall;
-            IDisposable? privateFunctionToolLifetime;
+            IAsyncDisposable? privateFunctionToolLifetime;
             IAudioProcessor? audioProcessor;
             IVad? vad;
             IAsr? asr;
@@ -157,37 +148,52 @@ namespace Agent.Telephone.Common.Contexts
                 this._privateFunctionTools.Clear();
             }
 
-            privateFunctionToolLifetime?.Dispose();
-
+            List<Exception> errors = [];
+            try
+            {
+                if (privateFunctionToolLifetime is not null)
+                {
+                    await privateFunctionToolLifetime.DisposeAsync();
+                }
+            }
+            catch (Exception exception)
+            {
+                errors.Add(exception);
+            }
             if (activeCall is not null)
             {
-                UnregisterProvider(audioProcessor, activeCall);
-                UnregisterProvider(vad, activeCall);
-                UnregisterProvider(asr, activeCall);
-                llm?.UnregisterDevice(activeCall);
-                UnregisterProvider(tts, activeCall);
-                UnregisterProvider(offlineDialogue, activeCall);
-                UnregisterProvider(callControl, activeCall);
-                UnregisterProvider(dtmfInput, activeCall);
+                Action[] unregisterProviders =
+                [
+                    () => UnregisterProvider(audioProcessor, activeCall),
+                    () => UnregisterProvider(vad, activeCall),
+                    () => UnregisterProvider(asr, activeCall),
+                    () => UnregisterProvider(llm, activeCall),
+                    () => UnregisterProvider(tts, activeCall),
+                    () => UnregisterProvider(offlineDialogue, activeCall),
+                    () => UnregisterProvider(callControl, activeCall),
+                    () => UnregisterProvider(dtmfInput, activeCall),
+                ];
+                foreach (Action unregister in unregisterProviders)
+                {
+                    try
+                    {
+                        unregister();
+                    }
+                    catch (Exception exception)
+                    {
+                        errors.Add(exception);
+                    }
+                }
             }
+            if (errors.Count > 0)
+            {
+                throw new AggregateException(errors);
+            }
+        }
 
-            if (vad is { IsSherpaModel: false })
-            {
-                vad.Dispose();
-            }
-            if (asr is { IsSherpaModel: false })
-            {
-                asr.Dispose();
-            }
-            if (tts is { IsSherpaModel: false })
-            {
-                tts.Dispose();
-            }
-            audioProcessor?.Dispose();
-            llm?.Dispose();
-            offlineDialogue?.Dispose();
-            callControl?.Dispose();
-            dtmfInput?.Dispose();
+        public void Dispose()
+        {
+            this.DisposeAsync().GetAwaiter().GetResult();
         }
 
         private void SetProvider<TProvider>(TProvider provider, Action<PrivateProvider, TProvider> assign)

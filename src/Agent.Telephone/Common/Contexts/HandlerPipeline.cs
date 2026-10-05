@@ -85,7 +85,14 @@ namespace Agent.Telephone.Common.Contexts
 
             foreach (Action complete in completeWriters)
             {
-                complete();
+                try
+                {
+                    complete();
+                }
+                catch (Exception exception)
+                {
+                    logger?.LogError(exception, "完成 Handler 管线 Channel 时失败。");
+                }
             }
 
             if (handlerTasks is not null)
@@ -107,7 +114,14 @@ namespace Agent.Telephone.Common.Contexts
 
             for (int index = handlers.Count - 1; index >= 0; index--)
             {
-                handlers[index].Dispose();
+                try
+                {
+                    handlers[index].Dispose();
+                }
+                catch (Exception exception)
+                {
+                    logger?.LogError(exception, "释放 Handler {HandlerName} 时失败。", handlers[index].HandlerName);
+                }
             }
         }
     }

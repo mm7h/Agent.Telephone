@@ -70,7 +70,6 @@ namespace Agent.Telephone.Providers.LLM
                 this._subAgents[outputAgent.AgentName] = outputAgent;
 
                 bool buildSuccess = this._subAgents.Values
-                    .AsParallel()
                     .Select(agent =>
                     {
                         if (modelSetting.AgentSettings.TryGetValue(agent.AgentName, out ModelSetting? agentSetting))
@@ -349,10 +348,6 @@ namespace Agent.Telephone.Providers.LLM
 
         public override void Dispose()
         {
-            foreach (var agent in this._subAgents.Values)
-            {
-                agent.Dispose();
-            }
             this._subAgents.Clear();
             this._dialogueWorkflow = null;
         }

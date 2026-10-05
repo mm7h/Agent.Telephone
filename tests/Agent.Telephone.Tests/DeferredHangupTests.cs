@@ -203,6 +203,7 @@ public sealed class DeferredHangupTests
     {
         var transport = new SIPTransport();
         var device = new DeviceContext(
+            TestServices.ScopeFactory,
             transport,
             new DeviceRegistrationRecord(
                 "device-1",

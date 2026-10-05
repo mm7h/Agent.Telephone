@@ -181,10 +181,9 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
         }
 
-        public override void Dispose()
+        protected override void DisposeResources()
         {
-            this.ActiveCallContext.CompletePromptPlayback(fullyPlayed: false);
-            base.Dispose();
+            this.ActiveCallContext?.CompletePromptPlayback(fullyPlayed: false);
         }
     }
 }

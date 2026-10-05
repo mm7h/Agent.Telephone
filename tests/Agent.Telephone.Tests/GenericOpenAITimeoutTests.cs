@@ -181,6 +181,7 @@ public sealed class GenericOpenAITimeoutTests
                 NullLogger<GenericOpenAI>.Instance);
             DateTimeOffset now = DateTimeOffset.UtcNow;
             this._device = new DeviceContext(
+                TestServices.ScopeFactory,
                 this._transport,
                 new DeviceRegistrationRecord("test", "sip:user@test", "sip:user@192.0.2.1", now, now, now.AddMinutes(5)),
                 [new AssistantConfig { DialingNumber = "10088" }]);

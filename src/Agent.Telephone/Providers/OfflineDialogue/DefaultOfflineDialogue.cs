@@ -15,7 +15,7 @@ using SIPSorceryMedia.Abstractions;
 
 namespace Agent.Telephone.Providers.OfflineDialogue
 {
-    internal sealed class DefaultOfflineDialogue : BaseProvider<DefaultOfflineDialogue, ModelSetting>, IOfflineDialogue
+    internal sealed class DefaultOfflineDialogue : BaseProvider<DefaultOfflineDialogue, ModelSetting>, IOfflineDialogue, IAsyncDisposable
     {
         private const int DtmfTimeoutSeconds = 15;
         private const int PersistenceQueueCapacity = 128;
@@ -477,6 +477,8 @@ namespace Agent.Telephone.Providers.OfflineDialogue
         {
             SIPUserAgent? userAgent = null;
             VoIPMediaSession? mediaSession = null;
+            ActiveCallContext? callbackCall = null;
+            bool pipelineReady = false;
             try
             {
                 turn.ProactiveCallCancellation.Token.ThrowIfCancellationRequested();
@@ -494,11 +496,9 @@ namespace Agent.Telephone.Providers.OfflineDialogue
                     turn.AssistantNumber,
                     userAgent,
                     mediaSession,
-                    out ActiveCallContext? callbackCall) || callbackCall is null)
+                    out callbackCall) || callbackCall is null)
                 {
                     turn.CompleteProactiveCall(answered: false);
-                    device.EndCallback();
-                    mediaSession.Close("callback was not connected");
                     return;
                 }
 
@@ -510,8 +510,6 @@ namespace Agent.Telephone.Providers.OfflineDialogue
                 };
                 if (!callbackCall.TryAcquireUse(out IDisposable? callUseLease) || callUseLease is null)
                 {
-                    device.CloseCallSession(callbackCall);
-                    device.EndCallback();
                     return;
                 }
 
@@ -521,24 +519,44 @@ namespace Agent.Telephone.Providers.OfflineDialogue
                         !await this._providerManager.BuildForActiveCallAsync(device) ||
                         !await this._handlerManager.BuildForCallbackCallAsync(device, turn.AssistantMessageId))
                     {
-                        device.CloseCallSession(callbackCall);
-                        device.EndCallback();
+                        return;
                     }
+                    pipelineReady = true;
                 }
             }
             catch (OperationCanceledException) when (turn.ProactiveCallCancellation.IsCancellationRequested)
             {
                 turn.CompleteProactiveCall(answered: false);
-                userAgent?.Hangup();
-                device.EndCallback();
-                mediaSession?.Close("callback cancelled");
             }
             catch (Exception exception)
             {
                 turn.CompleteProactiveCall(answered: false);
                 this.Logger.LogError(exception, "回拨用户 {UserAor} 的离线回复 {MessageId} 失败。", turn.UserAor, turn.AssistantMessageId);
-                device.EndCallback();
-                mediaSession?.Close("callback failed");
+            }
+            finally
+            {
+                if (!pipelineReady)
+                {
+                    try
+                    {
+                        userAgent?.Hangup();
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            if (callbackCall is not null)
+                            {
+                                device.CloseCallSession(callbackCall);
+                            }
+                        }
+                        finally
+                        {
+                            device.EndCallback();
+                            mediaSession?.Close("callback initialization failed");
+                        }
+                    }
+                }
             }
         }
 
@@ -705,6 +723,15 @@ namespace Agent.Telephone.Providers.OfflineDialogue
             }
 
             this._operations.Writer.TryComplete();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            this.Dispose();
+            if (this._writerTask is not null)
+            {
+                await this._writerTask;
+            }
         }
 
         private sealed record PersistenceOperation(

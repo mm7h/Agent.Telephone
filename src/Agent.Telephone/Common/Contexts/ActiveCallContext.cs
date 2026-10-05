@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Constants;
+using Microsoft.Extensions.DependencyInjection;
 using SIPSorcery.Media;
 using SIPSorcery.Net;
 using SIPSorcery.SIP;
@@ -14,6 +15,9 @@ namespace Agent.Telephone.Common.Contexts
         // G.711 电话 RTP 保持小帧，以满足实时性并避免超出底层 UDP 接收缓冲区。
         private const int MinimumPacketTimeMs = 10;
         private const int MaximumPacketTimeMs = 60;
+        private readonly AsyncServiceScope _serviceScope;
+        private readonly TaskCompletionSource _disposeCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private bool _disposeStarted;
         private readonly string _userAor;
         private readonly CancellationTokenSource _callCts = new();
         private readonly CancellationToken _callToken;
@@ -23,9 +27,12 @@ namespace Agent.Telephone.Common.Contexts
         private readonly object _promptPlaybackLock = new();
         private readonly List<IDisposable> _callOwnedResources = [];
         private CancellationTokenSource _turnCts;
+        private CancellationToken _turnToken;
+        private bool _stopping;
         private long _turnId;
         private int _useCount;
-        private bool _disposeRequested;
+        private volatile bool _disposeRequested;
+        private bool _transportEnded;
         private bool _callEnded;
         private bool _assistantSwitching;
         private int _agentMediaPaused;
@@ -42,13 +49,28 @@ namespace Agent.Telephone.Common.Contexts
             this.CallId = Guid.NewGuid().ToString("N");
             this.DeviceId = deviceContext.DeviceId;
             this._turnCts = new CancellationTokenSource();
+            this._turnToken = this._turnCts.Token;
             this._callToken = this._callCts.Token;
 
-            this.CreateSIPUserAgent(sipTransport);
-            this.CreateVoIPMediaSession();
-            this.GetRemoteAudioPacketization(sipRequest);
-            this.GetPhoneNumbers(sipRequest);
-            this.CreateAIAgentContext();
+            this._serviceScope = deviceContext.ServiceScopeFactory.CreateAsyncScope();
+            try
+            {
+                this.CreateSIPUserAgent(sipTransport);
+                this.CreateVoIPMediaSession();
+                this.GetRemoteAudioPacketization(sipRequest);
+                this.GetPhoneNumbers(sipRequest);
+                this.CreateAIAgentContext();
+                deviceContext.TrackCall(this);
+            }
+            catch
+            {
+                this.AIAgentContext?.Dispose();
+                this._serviceScope.Dispose();
+                this._turnCts.Dispose();
+                this._callCts.Dispose();
+                this.VoIPRTP?.Close("call initialization failed");
+                throw;
+            }
         }
 
         public ActiveCallContext(
@@ -63,16 +85,33 @@ namespace Agent.Telephone.Common.Contexts
             this.CallId = Guid.NewGuid().ToString("N");
             this.DeviceId = deviceContext.DeviceId;
             this._turnCts = new CancellationTokenSource();
+            this._turnToken = this._turnCts.Token;
             this._callToken = this._callCts.Token;
             this.UserAgent = userAgent;
             this.VoIPRTP = mediaSession;
-            this.NegotiatedAudioFormat = mediaSession.AudioStream.GetSendingFormat().ToAudioFormat();
-            this.PacketTimeMs = AudioProcessSettings.DefaultPacketTimeMs;
-            this.MaxPacketTimeMs = this.PacketTimeMs;
-            this.CallerNumber = SIPURI.ParseSIPURI(userAor).User;
-            this.DialedNumber = assistantNumber;
-            this.CreateAIAgentContext();
+            this._serviceScope = deviceContext.ServiceScopeFactory.CreateAsyncScope();
+            try
+            {
+                this.NegotiatedAudioFormat = mediaSession.AudioStream.GetSendingFormat().ToAudioFormat();
+                this.PacketTimeMs = AudioProcessSettings.DefaultPacketTimeMs;
+                this.MaxPacketTimeMs = this.PacketTimeMs;
+                this.CallerNumber = SIPURI.ParseSIPURI(userAor).User;
+                this.DialedNumber = assistantNumber;
+                this.CreateAIAgentContext();
+                deviceContext.TrackCall(this);
+            }
+            catch
+            {
+                this.AIAgentContext?.Dispose();
+                this._serviceScope.Dispose();
+                this._turnCts.Dispose();
+                this._callCts.Dispose();
+                this.VoIPRTP.Close("call initialization failed");
+                throw;
+            }
         }
+        public IServiceProvider ServiceProvider => this._serviceScope.ServiceProvider;
+        public Task Disposal => this._disposeCompletion.Task;
         public DeviceContext DeviceContext { get;}
         public string CallId { get; }
         public string DeviceId { get; }
@@ -88,7 +127,16 @@ namespace Agent.Telephone.Common.Contexts
         public AssistantConfig AssistantConfig { get; private set; }
         public long TurnId => Interlocked.Read(ref this._turnId);
         public CancellationToken CallToken => this._callToken;
-        public CancellationToken Token => this._turnCts.Token;
+        public CancellationToken Token
+        {
+            get
+            {
+                lock (this._turnLock)
+                {
+                    return this._turnToken;
+                }
+            }
+        }
         public bool IsAgentMediaPaused => Volatile.Read(ref this._agentMediaPaused) != 0;
         public bool IsUserAudioInputPaused => Volatile.Read(ref this._userAudioInputPaused) != 0;
         public bool IsUserAudioProcessing => Interlocked.Read(ref this._userAudioProcessingTurnId) >= 0;
@@ -104,7 +152,13 @@ namespace Agent.Telephone.Common.Contexts
         }
         public event Action<CancellationToken>? TurnTokenChanged;
 
-        public void Cancel() => this._callCts.Cancel();
+        public void Cancel()
+        {
+            if (!this._callToken.IsCancellationRequested)
+            {
+                this._callCts.Cancel();
+            }
+        }
 
         public void PauseAgentMedia() => Interlocked.Exchange(ref this._agentMediaPaused, 1);
         public void ResumeAgentMedia() => Interlocked.Exchange(ref this._agentMediaPaused, 0);
@@ -329,20 +383,51 @@ namespace Agent.Telephone.Common.Contexts
             CancellationToken nextToken;
             lock (this._turnLock)
             {
-                if (this._callCts.IsCancellationRequested)
+                if (this._disposeRequested || this._stopping || this._callToken.IsCancellationRequested)
                 {
                     return;
                 }
-
                 previous = this._turnCts;
                 this._turnCts = new CancellationTokenSource();
+                this._turnToken = this._turnCts.Token;
                 Interlocked.Increment(ref this._turnId);
-                nextToken = this._turnCts.Token;
+                nextToken = this._turnToken;
             }
+            try
+            {
+                previous.Cancel();
+            }
+            finally
+            {
+                previous.Dispose();
+                this.TurnTokenChanged?.Invoke(nextToken);
+            }
+        }
 
-            previous.Cancel();
-            previous.Dispose();
-            this.TurnTokenChanged?.Invoke(nextToken);
+        public void Stop()
+        {
+            CancellationTokenSource turnCts;
+            CancellationToken turnToken;
+            lock (this._turnLock)
+            {
+                this._stopping = true;
+                turnCts = this._turnCts;
+                turnToken = this._turnToken;
+            }
+            try
+            {
+                if (!turnToken.IsCancellationRequested)
+                {
+                    turnCts.Cancel();
+                }
+            }
+            catch (ObjectDisposedException) when (turnToken.IsCancellationRequested)
+            {
+            }
+            finally
+            {
+                this.Dispose();
+            }
         }
 
         [MemberNotNull(nameof(this.UserAgent))]
@@ -438,65 +523,103 @@ namespace Agent.Telephone.Common.Contexts
 
         public void Dispose()
         {
-            this.EndCallTransport();
-
             lock (this._lifetimeLock)
             {
                 if (this._disposeRequested)
                 {
                     return;
                 }
-
                 this._disposeRequested = true;
-                if (this._useCount > 0)
-                {
-                    return;
-                }
             }
 
-            this.DisposeCore();
+            try
+            {
+                this.EndCallTransport();
+            }
+            finally
+            {
+                lock (this._lifetimeLock)
+                {
+                    this._transportEnded = true;
+                }
+                this.TryStartDisposal();
+            }
         }
 
         private void ReleaseUse()
         {
-            bool shouldDispose = false;
             lock (this._lifetimeLock)
             {
                 this._useCount--;
-                shouldDispose = this._disposeRequested && this._useCount == 0;
             }
-
-            if (shouldDispose)
-            {
-                ThreadPool.QueueUserWorkItem(
-                    static state => ((ActiveCallContext)state!).DisposeCore(),
-                    this);
-            }
+            this.TryStartDisposal();
         }
 
-        private void DisposeCore()
+        private void TryStartDisposal()
         {
-            List<IDisposable> callOwnedResources;
-            this.EndCallTransport();
-            this._turnCts.Cancel();
             lock (this._lifetimeLock)
             {
-                callOwnedResources = [.. this._callOwnedResources];
-                this._callOwnedResources.Clear();
+                if (!this._disposeRequested || !this._transportEnded || this._useCount != 0 || this._disposeStarted)
+                {
+                    return;
+                }
+                this._disposeStarted = true;
             }
-            lock (this._agentSessionLock)
-            {
-                this._assistantSwitching = false;
-                this.AIAgentContext.Dispose();
-            }
+            _ = this.DisposeCoreAsync();
+        }
 
-            for (int index = callOwnedResources.Count - 1; index >= 0; index--)
+        private async Task DisposeCoreAsync()
+        {
+            List<Exception> errors = [];
+            try
             {
-                callOwnedResources[index].Dispose();
-            }
+                try
+                {
+                    this._turnCts.Cancel();
+                }
+                catch (Exception exception)
+                {
+                    errors.Add(exception);
+                }
+                try
+                {
+                    await this.AIAgentContext.DisposeAsync();
+                }
+                catch (Exception exception)
+                {
+                    errors.Add(exception);
+                }
 
-            this._turnCts.Dispose();
-            this._callCts.Dispose();
+                List<IDisposable> callOwnedResources;
+                lock (this._lifetimeLock)
+                {
+                    callOwnedResources = [.. this._callOwnedResources];
+                    this._callOwnedResources.Clear();
+                }
+                for (int index = callOwnedResources.Count - 1; index >= 0; index--)
+                {
+                    try
+                    {
+                        callOwnedResources[index].Dispose();
+                    }
+                    catch (Exception exception)
+                    {
+                        errors.Add(exception);
+                    }
+                }
+                this._turnCts.Dispose();
+                this._callCts.Dispose();
+                await this._serviceScope.DisposeAsync();
+                if (errors.Count > 0)
+                {
+                    throw new AggregateException(errors);
+                }
+                this._disposeCompletion.TrySetResult();
+            }
+            catch (Exception exception)
+            {
+                this._disposeCompletion.TrySetException(exception);
+            }
         }
 
         private void EndCallTransport()
@@ -516,9 +639,15 @@ namespace Agent.Telephone.Common.Contexts
                 this._callEnded = true;
             }
 
-            this._callCts.Cancel();
-            this.CompletePromptPlayback(fullyPlayed: false);
-            this.VoIPRTP.Close("call ended");
+            try
+            {
+                this._callCts.Cancel();
+            }
+            finally
+            {
+                this.CompletePromptPlayback(fullyPlayed: false);
+                this.VoIPRTP.Close("call ended");
+            }
         }
 
         private sealed class CallUseLease : IDisposable
