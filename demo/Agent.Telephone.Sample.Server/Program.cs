@@ -3,9 +3,9 @@ using System.Text.Json.Serialization;
 using Agent.Telephone;
 using Agent.Telephone.Abstractions;
 using Agent.Telephone.Abstractions.Configs;
-using Agent.Telephone.Sample.Server;
 using Agent.Telephone.Sample.Server.FunctionTools;
 using Agent.Telephone.Sample.Server.MessageStore;
+using Figgle.Fonts;
 using Microsoft.Extensions.Hosting;
 
 
@@ -16,7 +16,7 @@ IHost? serverHost = null;
 IServerBuilder serverBuilder = EngineFactory.CreateAgentTelephoneBuilder();
 try
 {
-    Console.WriteLine(StartupMessage.Message);
+    Console.WriteLine(FiggleFonts.Standard.Render("Agent.Telephone"));
 
     string configJson = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "configs", "config.json"));
 
