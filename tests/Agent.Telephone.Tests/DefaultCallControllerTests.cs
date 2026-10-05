@@ -91,6 +91,7 @@ public sealed class DefaultCallControllerTests
             $"sip:{DEVICE_NUMBER}@192.0.2.10:5060",
             300);
         var device = new DeviceContext(
+            TestServices.ScopeFactory,
             transport,
             register,
             SIPURI.ParseSIPURI($"sip:{DEVICE_NUMBER}@192.0.2.10:5060"),

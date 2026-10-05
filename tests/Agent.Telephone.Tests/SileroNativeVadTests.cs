@@ -168,6 +168,7 @@ public sealed class SileroNativeVadTests
             now,
             now.AddMinutes(5));
         return new DeviceContext(
+            TestServices.ScopeFactory,
             transport,
             registration,
             [new AssistantConfig { DialingNumber = "10000" }]);

@@ -184,14 +184,13 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
         }
 
-        public override void Dispose()
+        protected override void DisposeResources()
         {
             if (this._audioProcessor is not null)
             {
                 this._audioProcessor.OnMixedAudioDataAvailable -= this.OnMixedAudioDataAvailableAsync;
             }
 
-            base.Dispose();
         }
     }
 }

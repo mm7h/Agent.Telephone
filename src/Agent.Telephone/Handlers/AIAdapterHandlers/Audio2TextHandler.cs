@@ -153,9 +153,8 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             this.ActiveCallContext.CompleteUserAudioProcessing(turnId);
         }
 
-        public override void Dispose()
+        protected override void DisposeResources()
         {
-            base.Dispose();
         }
     }
 }

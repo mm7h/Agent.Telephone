@@ -15,20 +15,22 @@ namespace Agent.Telephone.Providers.LLM.Contexts
             this.DefaultAction = toolAction;
             this.DtmfKeys = DtmfKey.None;
         }
-        public FunctionToolRegistration(AIFunction function, ToolAction toolAction)
+        public FunctionToolRegistration(AIFunction function, ToolAction toolAction, string? preExecutionPrompt = null)
         {
             this.Function = function;
             this.Metadata = FunctionToolHelper.ToFunctionMetadata(function);
             this.DefaultAction = toolAction;
             this.DtmfKeys = DtmfKey.None;
+            this.PreExecutionPrompt = preExecutionPrompt;
         }
 
-        public FunctionToolRegistration(AIFunction function, FunctionMetadata metadata, ToolAction toolAction, DtmfKey dtmfKeys)
+        public FunctionToolRegistration(AIFunction function, FunctionMetadata metadata, ToolAction toolAction, DtmfKey dtmfKeys, string? preExecutionPrompt = null)
         {
             this.Function = function;
             this.Metadata = metadata;
             this.DefaultAction = toolAction;
             this.DtmfKeys = dtmfKeys;
+            this.PreExecutionPrompt = preExecutionPrompt;
         }
 
 
@@ -39,6 +41,8 @@ namespace Agent.Telephone.Providers.LLM.Contexts
         public ToolAction DefaultAction { get; }
 
         public DtmfKey DtmfKeys { get; }
+
+        public string? PreExecutionPrompt { get; }
 
         public void WithFunction(AIFunction function)
         {

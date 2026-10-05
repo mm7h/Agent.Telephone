@@ -46,13 +46,13 @@ public sealed class AssistantSwitchFunctionToolTests
             NullLogger<FunctionToolManager>.Instance);
         Assert.True(manager.BuildComponent());
 
-        using TestCallSession operatorCall = CreateCall(config, "10000");
+        using TestCallSession operatorCall = CreateCall(config, "10000", services.GetRequiredService<IServiceScopeFactory>());
         Assert.True(await manager.BuildForActiveCallAsync(operatorCall.Device));
         Assert.Collection(
             operatorCall.Call.AIAgentContext.PrivateProvider.FunctionTools,
             tool => Assert.Equal(nameof(AssistantSwitch.SwitchAssistantAsync), tool.Name));
 
-        using TestCallSession generalCall = CreateCall(config, "10086");
+        using TestCallSession generalCall = CreateCall(config, "10086", services.GetRequiredService<IServiceScopeFactory>());
         Assert.True(await manager.BuildForActiveCallAsync(generalCall.Device));
         Assert.Empty(generalCall.Call.AIAgentContext.PrivateProvider.FunctionTools);
     }
@@ -123,10 +123,11 @@ public sealed class AssistantSwitchFunctionToolTests
         };
     }
 
-    private static TestCallSession CreateCall(TelephoneConfig config, string assistantNumber)
+    private static TestCallSession CreateCall(TelephoneConfig config, string assistantNumber, IServiceScopeFactory? scopeFactory = null)
     {
         var transport = new SIPTransport();
         var device = new DeviceContext(
+            scopeFactory ?? TestServices.ScopeFactory,
             transport,
             new DeviceRegistrationRecord(
                 "1001",

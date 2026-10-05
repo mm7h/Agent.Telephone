@@ -134,6 +134,17 @@ namespace Agent.Telephone.Providers.LLM.Agents.Intent
             {
                 throw new SessionNotInitializedException();
             }
+
+            if (executionResult.Action == ToolAction.DirectResponse)
+            {
+                if (!string.IsNullOrWhiteSpace(executionResult.Response))
+                {
+                    await context.YieldOutputAsync(executionResult.Response, token);
+                    this._chatHistoryProvider?.Append(ChatRole.Assistant, executionResult.Response);
+                }
+                return;
+            }
+
             if (this._chatClientAgent is null)
             {
                 throw new InvalidOperationException("IntentResponseAgent 未初始化。");

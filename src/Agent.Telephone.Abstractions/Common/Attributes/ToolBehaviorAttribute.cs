@@ -32,5 +32,10 @@ namespace Agent.Telephone.Abstractions.Common.Attributes
         /// 调用 DTMF 工具前由系统播放的固定按键提示。
         /// </summary>
         public string? DtmfPrompt { get; set; }
+
+        /// <summary>
+        /// 调用工具前由系统立即播报的固定提示。
+        /// </summary>
+        public string? PreExecutionPrompt { get; set; }
     }
 }

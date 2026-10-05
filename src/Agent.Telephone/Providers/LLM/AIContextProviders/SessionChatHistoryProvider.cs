@@ -38,7 +38,44 @@ namespace Agent.Telephone.Providers.LLM.AIContextProviders
         {
             lock (this._lock)
             {
-                return this._messages.Select(static message => new ChatMessage(message.Role, message.Text)).ToList();
+                return this._messages.Select(static message => message.Clone()).ToList();
+            }
+        }
+
+        public void RemoveIncompleteFunctionCalls()
+        {
+            lock (this._lock)
+            {
+                HashSet<string> completedCallIds = this._messages
+                    .SelectMany(static message => message.Contents.OfType<FunctionResultContent>())
+                    .Select(static result => result.CallId)
+                    .Where(static callId => !string.IsNullOrWhiteSpace(callId))
+                    .ToHashSet(StringComparer.Ordinal);
+                HashSet<string> retainedCallIds = [];
+                List<ChatMessage> validMessages = [];
+
+                foreach (ChatMessage message in this._messages)
+                {
+                    FunctionCallContent[] calls = message.Contents.OfType<FunctionCallContent>().ToArray();
+                    if (calls.Any(call => string.IsNullOrWhiteSpace(call.CallId) || !completedCallIds.Contains(call.CallId)))
+                    {
+                        continue;
+                    }
+
+                    foreach (FunctionCallContent call in calls)
+                    {
+                        retainedCallIds.Add(call.CallId);
+                    }
+
+                    validMessages.Add(message);
+                }
+
+                List<ChatMessage> filteredMessages = validMessages
+                    .Where(message => message.Contents.OfType<FunctionResultContent>()
+                        .All(result => !string.IsNullOrWhiteSpace(result.CallId) && retainedCallIds.Contains(result.CallId)))
+                    .ToList();
+                this._messages.Clear();
+                this._messages.AddRange(filteredMessages);
             }
         }
 
@@ -50,22 +87,15 @@ namespace Agent.Telephone.Providers.LLM.AIContextProviders
         protected override ValueTask StoreChatHistoryAsync(InvokedContext context, CancellationToken cancellationToken)
         {
             IEnumerable<ChatMessage> responseMessages = context.ResponseMessages ?? [];
-            foreach (ChatMessage message in context.RequestMessages.Concat(responseMessages))
+            lock (this._lock)
             {
-                if (this.IsConversationMessage(message))
+                foreach (ChatMessage message in context.RequestMessages.Concat(responseMessages))
                 {
-                    this.Append(message.Role, message.Text);
+                    this._messages.Add(message.Clone());
                 }
             }
 
             return ValueTask.CompletedTask;
-        }
-
-        private bool IsConversationMessage(ChatMessage message)
-        {
-            return (message.Role == ChatRole.User || message.Role == ChatRole.Assistant)
-                && !string.IsNullOrWhiteSpace(message.Text)
-                && message.Contents.All(static content => content is not FunctionCallContent && content is not FunctionResultContent);
         }
     }
 }

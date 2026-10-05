@@ -1,6 +1,8 @@
 using Agent.Telephone.Abstractions.Configs;
 using Agent.Telephone.Common.Configs;
 using Agent.Telephone.Common.Contexts;
+using Agent.Telephone.Abstractions.Common.Enums;
+using Agent.Telephone.Abstractions.Common.Contexts;
 using Agent.Telephone.Providers.LLM.AIContextProviders;
 using Agent.Telephone.Providers.LLM.Agents;
 using Agent.Telephone.Providers.LLM.Agents.Intent;
@@ -59,8 +61,10 @@ public sealed class ChatAgentHistoryTests
         Assert.Equal(ReasoningOutput.None, chatClient.LastOptions.Reasoning.Output);
     }
 
-    [Fact]
-    public async Task StoresNormalTurnsInTheBoundSessionHistoryAsync()
+    [Theory]
+    [InlineData("None")]
+    [InlineData("FunctionCall")]
+    public async Task StoresNormalTurnsInTheBoundSessionHistoryAsync(string intentType)
     {
         var chatClient = new ScriptedChatClient(["第一答。", "第二答。"]);
         ServiceCollection services = new();
@@ -70,13 +74,15 @@ public sealed class ChatAgentHistoryTests
         var historyProvider = new SessionChatHistoryProvider();
         List<ChatMessage> history = [new(ChatRole.System, "此前的对话")];
         historyProvider.Bind(history);
+        PrivateProvider privateProvider = new("device");
+        privateProvider.FunctionTools.Add(AIFunctionFactory.Create((Func<string>)(static () => "ok"), "UnusedTool"));
         var config = new LLMAgentBuildConfig(
             new ModelSetting
             {
                 ModelName = "history",
-                Config = new Dictionary<string, string> { ["Prompt"] = "你是助手。" },
+                Config = new Dictionary<string, string> { ["Prompt"] = "你是助手。", ["IntentType"] = intentType },
             },
-            new PrivateProvider("device"),
+            privateProvider,
             historyProvider);
 
         Assert.True(agent.Build(config));
@@ -98,6 +104,78 @@ public sealed class ChatAgentHistoryTests
             message => Assert.Equal((ChatRole.User, "第一问"), (message.Role, message.Text)),
             message => Assert.Equal((ChatRole.Assistant, "第一答。"), (message.Role, message.Text)),
             message => Assert.Equal((ChatRole.User, "第二问"), (message.Role, message.Text)));
+    }
+
+    [Theory]
+    [InlineData("", "任务已完成。", true, "RunTask", "任务已完成。")]
+    [InlineData("这个任务会花一点时间。你可以先挂断电话。", "任务已完成。查询结果如下。", true, "RunTask", "任务已完成。查询结果如下。")]
+    [InlineData("好的。再见。有需要随时找我。", "好的。再见。有需要随时找我。", false, "RunTask", "好的。再见。有需要随时找我。")]
+    [InlineData("正在处理。", "请说再见。请说再见。", false, "RunTask", "请说再见。请说再见。")]
+    [InlineData("", "好的。再见。好的。再见。", false, "HangupCurrentCall", "好的。再见。")]
+    public async Task SpeaksOnlyFinalReplyAndPreservesToolHistoryAsync(
+        string preToolText,
+        string finalText,
+        bool includeMessageIds,
+        string functionName,
+        string expectedText)
+    {
+        var chatClient = new FunctionCallingChatClient(preToolText, finalText, includeMessageIds, functionName);
+        ServiceCollection services = new();
+        services.AddKeyedSingleton<IChatClient>("LLM_tool-history", chatClient);
+        using ServiceProvider serviceProvider = services.BuildServiceProvider();
+        using var agent = new ChatAgent(serviceProvider, NullLogger<ChatAgent>.Instance);
+        var privateProvider = new PrivateProvider("device");
+        privateProvider.FunctionTools.Add(AIFunctionFactory.Create((Func<string>)(static () => "任务结果"), functionName));
+        var historyProvider = new SessionChatHistoryProvider();
+        List<ChatMessage> history = [];
+        historyProvider.Bind(history);
+        var config = new LLMAgentBuildConfig(
+            new ModelSetting
+            {
+                ModelName = "tool-history",
+                Config = new Dictionary<string, string>
+                {
+                    ["Prompt"] = "你是助手。",
+                    ["IntentType"] = "FunctionCall",
+                },
+            },
+            privateProvider,
+            historyProvider);
+
+        Assert.True(agent.Build(config));
+        agent.RegisterDevice("device");
+
+        string spoken = await this.DrainResponseAsync(agent, "执行任务");
+
+        Assert.Equal(expectedText, spoken);
+        Assert.True(chatClient.ReceivedPairedToolMessages);
+        Assert.Contains(history, message => message.Contents.OfType<FunctionCallContent>().Any());
+        Assert.Contains(history, message => message.Contents.OfType<FunctionResultContent>().Any());
+    }
+
+    [Fact]
+    public void RemoveIncompleteFunctionCalls_DropsIncompleteFunctionCalls()
+    {
+        var historyProvider = new SessionChatHistoryProvider();
+        List<ChatMessage> history =
+        [
+            new(ChatRole.User, "执行任务"),
+            new(ChatRole.Assistant, [new FunctionCallContent("incomplete", "RunTask", new Dictionary<string, object?>())]),
+        ];
+        historyProvider.Bind(history);
+
+        historyProvider.RemoveIncompleteFunctionCalls();
+        IReadOnlyList<ChatMessage> messages = historyProvider.GetMessages();
+
+        Assert.DoesNotContain(messages, message => message.Contents.OfType<FunctionCallContent>().Any());
+
+        history.Add(new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("incomplete", "RunTask", new Dictionary<string, object?>())]));
+        history.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent("incomplete", "任务完成")]));
+        historyProvider.RemoveIncompleteFunctionCalls();
+        messages = historyProvider.GetMessages();
+
+        Assert.Contains(messages, message => message.Contents.OfType<FunctionCallContent>().Any());
+        Assert.Contains(messages, message => message.Contents.OfType<FunctionResultContent>().Any());
     }
 
     [Fact]
@@ -139,17 +217,22 @@ public sealed class ChatAgentHistoryTests
     }
 
     [Fact]
-    public async Task StoresIntentToolResultAndBroadcastResponseInSessionHistoryAsync()
+    public async Task DirectIntentToolResponseIsEmittedOnceWithoutCallingTheLlmAsync()
     {
-        var chatClient = new ScriptedChatClient(["北京今天晴天。"]);
+        var chatClient = new ScriptedChatClient([]);
         ServiceCollection services = new();
         services.AddKeyedSingleton<IChatClient>("LLM_intent", chatClient);
         using ServiceProvider serviceProvider = services.BuildServiceProvider();
         using var functionCallAgent = new FunctionCallAgent(serviceProvider, NullLogger<FunctionCallAgent>.Instance);
         using var intentResponseAgent = new IntentResponseAgent(serviceProvider, NullLogger<IntentResponseAgent>.Instance);
         var privateProvider = new PrivateProvider("device");
-        AIFunction function = AIFunctionFactory.Create((Func<string>)(static () => "北京晴天"));
-        privateProvider.FunctionTools.Add(function);
+        AIFunction function = AIFunctionFactory.Create((Func<FunctionReturn<string>>)(static () => new FunctionReturn<string>
+        {
+            Result = "感谢您的来电，再见。",
+            Response = "感谢您的来电，再见。",
+            Next = ToolAction.DirectResponse,
+        }));
+        privateProvider.AddFunctionToolRegistration(new FunctionToolRegistration(function, ToolAction.DirectResponse));
         var historyProvider = new SessionChatHistoryProvider();
         List<ChatMessage> history = [];
         historyProvider.Bind(history);
@@ -179,7 +262,7 @@ public sealed class ChatAgentHistoryTests
         var detection = new IntentDetectionResult(
             true,
             new FunctionMetadata { Name = function.Name },
-            "北京天气怎么样？");
+            "再见");
 
         await using StreamingRun run = await InProcessExecution.Concurrent.RunStreamingAsync(
             workflow,
@@ -190,25 +273,29 @@ public sealed class ChatAgentHistoryTests
         {
         }
 
+        Assert.Empty(chatClient.Requests);
         Assert.Collection(history,
-            message => Assert.Equal((ChatRole.User, "北京天气怎么样？"), (message.Role, message.Text)),
+            message => Assert.Equal((ChatRole.User, "再见"), (message.Role, message.Text)),
             message =>
             {
                 Assert.Equal(ChatRole.Assistant, message.Role);
                 Assert.Contains($"{function.Name} 执行结果：", message.Text, StringComparison.Ordinal);
-                Assert.Contains("北京晴天", message.Text, StringComparison.Ordinal);
+                Assert.Contains("感谢您的来电，再见。", message.Text, StringComparison.Ordinal);
             },
-            message => Assert.Equal((ChatRole.Assistant, "北京今天晴天。"), (message.Role, message.Text)));
+            message => Assert.Equal((ChatRole.Assistant, "感谢您的来电，再见。"), (message.Role, message.Text)));
     }
 
-    private async Task DrainResponseAsync(ChatAgent agent, string userMessage)
+    private async Task<string> DrainResponseAsync(ChatAgent agent, string userMessage)
     {
         var stream = (IAsyncEnumerable<string>)typeof(ChatAgent)
             .GetMethod("StreamLLMResponseAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(agent, [userMessage, CancellationToken.None])!;
-        await foreach (string _ in stream)
+        System.Text.StringBuilder spoken = new();
+        await foreach (string sentence in stream)
         {
+            spoken.Append(sentence);
         }
+        return spoken.ToString();
     }
 
     private sealed class ScriptedChatClient : IChatClient
@@ -268,6 +355,52 @@ public sealed class ChatAgentHistoryTests
             this.LastOptions = options;
             await Task.CompletedTask;
             yield break;
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class FunctionCallingChatClient(string preToolText, string finalText, bool includeMessageIds, string functionName) : IChatClient
+    {
+        public bool ReceivedPairedToolMessages { get; private set; }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<ChatResponse>(new NotSupportedException());
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.CompletedTask;
+            ChatMessage[] request = messages.ToArray();
+            int functionResultIndex = Array.FindIndex(request, static message => message.Contents.OfType<FunctionResultContent>().Any());
+            if (functionResultIndex >= 0)
+            {
+                this.ReceivedPairedToolMessages = request.Take(functionResultIndex)
+                    .Any(static message => message.Contents.OfType<FunctionCallContent>().Any());
+                if (!this.ReceivedPairedToolMessages)
+                {
+                    throw new InvalidOperationException("Function result was sent without its preceding function call.");
+                }
+
+                yield return new ChatResponseUpdate(ChatRole.Assistant, finalText) { MessageId = includeMessageIds ? "answer" : null };
+                yield break;
+            }
+
+            yield return new ChatResponseUpdate(ChatRole.Assistant, preToolText) { MessageId = includeMessageIds ? "call" : null };
+            yield return new ChatResponseUpdate(ChatRole.Assistant, (string?)null)
+            {
+                MessageId = includeMessageIds ? "call" : null,
+                Contents = [new FunctionCallContent("call", functionName, new Dictionary<string, object?>())],
+            };
         }
 
         public void Dispose()

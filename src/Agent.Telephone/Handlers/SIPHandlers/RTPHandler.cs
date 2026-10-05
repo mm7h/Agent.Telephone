@@ -93,14 +93,13 @@ namespace Agent.Telephone.Handlers.SIPHandlers
             this.ActiveCallContext.NegotiatedAudioFormat = audioFormats.FirstOrDefault(format => SupportedAudioFormats.SupportedAudioCodecs.Contains(format.Codec));
         }
 
-        public override void Dispose()
+        protected override void DisposeResources()
         {
             if (this._rtpContext is not null)
             {
                 this._rtpContext.OnRtpPacketReceived -= this.OnRtpPacketReceivedAsync;
                 this._rtpContext.OnAudioFormatsNegotiated -= this.OnAudioFormatsNegotiated;
             }
-            base.Dispose();
         }
     }
 }

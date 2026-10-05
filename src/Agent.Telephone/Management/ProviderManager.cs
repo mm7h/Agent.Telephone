@@ -131,64 +131,61 @@ namespace Agent.Telephone.Management
                 this.Logger.LogWarning("设备 {deviceId} 没有活动呼叫，无法构建处理器。", deviceContext.DeviceId);
                 return false;
             }
-            PrivateProvider providers = activeCall.AIAgentContext.PrivateProvider;
-            IAudioProcessor? pendingAudioProcessor = null;
-            IVad? pendingVad = null;
-            IAsr? pendingAsr = null;
-            ILlm? pendingLlm = null;
-            ITts? pendingTts = null;
-            IOfflineDialogue? pendingOfflineDialogue = null;
-            ICallControl? pendingCallControl = null;
-            IDtmfInput? pendingDtmfInput = null;
+            if (!activeCall.TryAcquireUse(out IDisposable? lease) || lease is null)
+            {
+                return false;
+            }
+            using IDisposable callLease = lease;
+            AIAgentContext agentContext = activeCall.AIAgentContext;
+            IServiceProvider serviceProvider = agentContext.ServiceProvider;
+            PrivateProvider providers = agentContext.PrivateProvider;
+            AssistantConfig assistantConfig = activeCall.AssistantConfig;
             try
             {
                 #region AudioProcessor Build
-                pendingAudioProcessor = this.ServiceProvider.GetRequiredService<IAudioProcessor>();
-                if (!pendingAudioProcessor.Build(ModelSetting.Empty))
+                IAudioProcessor audioProcessor = serviceProvider.GetRequiredService<IAudioProcessor>();
+                if (!audioProcessor.Build(ModelSetting.Empty))
                 {
-                    this.Logger.LogWarning("无法构建 {modelName} 提供程序。", pendingAudioProcessor.ModelName);
+                    this.Logger.LogWarning("无法构建 {modelName} 提供程序。", audioProcessor.ModelName);
                     return false;
                 }
-                providers.SetAudioProcessor(pendingAudioProcessor);
-                pendingAudioProcessor = null;
+                providers.SetAudioProcessor(audioProcessor);
                 #endregion
 
                 #region VAD Build
-                pendingVad = this.ServiceProvider.GetRequiredKeyedService<IVad>(ConvertToKebabCase(activeCall.AssistantConfig.VAD));
-                if (!pendingVad.IsSherpaModel && !pendingVad.Build(this.GetConfiguredSetting("VAD", activeCall.AssistantConfig.VAD, this.Config.ModelConfig)))
+                IVad vad = serviceProvider.GetRequiredKeyedService<IVad>(ConvertToKebabCase(assistantConfig.VAD));
+                if (!vad.IsSherpaModel && !vad.Build(this.GetConfiguredSetting("VAD", assistantConfig.VAD, this.Config.ModelConfig)))
                 {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", pendingVad.ModelName);
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", vad.ModelName);
                     return false;
                 }
-                providers.SetVad(pendingVad);
-                pendingVad = null;
+                providers.SetVad(vad);
                 #endregion
 
                 #region ASR Build
-                pendingAsr = this.ServiceProvider.GetRequiredKeyedService<IAsr>(ConvertToKebabCase(activeCall.AssistantConfig.ASR));
-                if (!pendingAsr.IsSherpaModel && !pendingAsr.Build(this.GetConfiguredSetting("ASR", activeCall.AssistantConfig.ASR, this.Config.ModelConfig)))
+                IAsr asr = serviceProvider.GetRequiredKeyedService<IAsr>(ConvertToKebabCase(assistantConfig.ASR));
+                if (!asr.IsSherpaModel && !asr.Build(this.GetConfiguredSetting("ASR", assistantConfig.ASR, this.Config.ModelConfig)))
                 {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", pendingAsr.ModelName);
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", asr.ModelName);
                     return false;
                 }
-                providers.SetAsr(pendingAsr);
-                pendingAsr = null;
+                providers.SetAsr(asr);
                 #endregion
 
                 #region LLM Build
-                ModelSetting selectedIntentLLMModelSetting = this.GetConfiguredSetting("Intent", activeCall.AssistantConfig.Intent, this.Config.ModelConfig);
+                ModelSetting selectedIntentLLMModelSetting = this.GetConfiguredSetting("Intent", assistantConfig.Intent, this.Config.ModelConfig);
                 string intentType = selectedIntentLLMModelSetting.Config.GetConfigValueOrDefault("Type", "None");
 
-                ModelSetting selectedChatLLMModelSetting = this.GetConfiguredSetting("LLM", activeCall.AssistantConfig.LLM, this.Config.ModelConfig);
+                ModelSetting selectedChatLLMModelSetting = this.GetConfiguredSetting("LLM", assistantConfig.LLM, this.Config.ModelConfig);
                 selectedChatLLMModelSetting.Config.SetConfigValue("IntentType", intentType);
-                selectedChatLLMModelSetting.Config.SetConfigValue("Prompt", activeCall.AssistantConfig.Prompt);
-                ITelephoneStore telephoneStore = this.ServiceProvider.GetRequiredService<ITelephoneStore>();
+                selectedChatLLMModelSetting.Config.SetConfigValue("Prompt", assistantConfig.Prompt);
+                ITelephoneStore telephoneStore = serviceProvider.GetRequiredService<ITelephoneStore>();
                 IReadOnlyList<ConversationMessage> conversationMessages = await telephoneStore.GetConversationMessagesAsync(
                     activeCall.UserAor,
                     activeCall.DialedNumber!,
                     activeCall.CallToken);
-                activeCall.AIAgentContext.LoadPersistedChatHistory(conversationMessages);
-                pendingLlm = this.ServiceProvider.GetRequiredService<ILlm>();
+                agentContext.LoadPersistedChatHistory(conversationMessages);
+                ILlm llm = serviceProvider.GetRequiredService<ILlm>();
 
                 ModelSetting intentResponseAgentSetting = new ModelSetting
                 {
@@ -215,61 +212,56 @@ namespace Agent.Telephone.Management
                     { SubAgentNames.OutputAgent, ModelSetting.Empty },
                 };
 
-                LLMBuildConfig llmBuildConfig = new LLMBuildConfig(agentSettings, activeCall.AIAgentContext.PrivateProvider, activeCall.AssistantConfig.LLMResponseTimeoutSeconds);
+                LLMBuildConfig llmBuildConfig = new LLMBuildConfig(agentSettings, agentContext.PrivateProvider, assistantConfig.LLMResponseTimeoutSeconds);
 
-                if (!pendingLlm.Build(llmBuildConfig))
+                if (!llm.Build(llmBuildConfig))
                 {
                     this.Logger.LogError("无法为设备 {deviceId} 构建通用 LLM 模型。", deviceContext.DeviceId);
                     return false;
                 }
-                providers.SetLlm(pendingLlm);
-                pendingLlm = null;
+                providers.SetLlm(llm);
                 #endregion
 
                 #region TTS Build
-                pendingTts = this.ServiceProvider.GetRequiredKeyedService<ITts>(ConvertToKebabCase(activeCall.AssistantConfig.TTS));
-                ModelSetting ttsModelSetting = this.GetConfiguredSetting("TTS", activeCall.AssistantConfig.TTS, this.Config.ModelConfig);
-                this.RandomSelectTTSSpeaker(ttsModelSetting, activeCall.AssistantConfig);
-                if (!pendingTts.IsSherpaModel && !pendingTts.Build(ttsModelSetting))
+                ITts tts = serviceProvider.GetRequiredKeyedService<ITts>(ConvertToKebabCase(assistantConfig.TTS));
+                ModelSetting ttsModelSetting = this.GetConfiguredSetting("TTS", assistantConfig.TTS, this.Config.ModelConfig);
+                this.RandomSelectTTSSpeaker(ttsModelSetting, assistantConfig);
+                if (!tts.IsSherpaModel && !tts.Build(ttsModelSetting))
                 {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", pendingTts.ModelName);
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", tts.ModelName);
                     return false;
                 }
-                providers.SetTts(pendingTts);
-                pendingTts = null;
+                providers.SetTts(tts);
                 #endregion
 
                 #region Offline Dialogue
-                pendingOfflineDialogue = this.ServiceProvider.GetRequiredService<IOfflineDialogue>();
-                if (!pendingOfflineDialogue.Build(ModelSetting.Empty))
+                IOfflineDialogue offlineDialogue = serviceProvider.GetRequiredService<IOfflineDialogue>();
+                if (!offlineDialogue.Build(ModelSetting.Empty))
                 {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", pendingOfflineDialogue.ModelName);
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", offlineDialogue.ModelName);
                     return false;
                 }
-                providers.SetOfflineDialogue(pendingOfflineDialogue);
-                pendingOfflineDialogue = null;
+                providers.SetOfflineDialogue(offlineDialogue);
                 #endregion
 
                 #region Call Control
-                pendingCallControl = this.ServiceProvider.GetRequiredService<ICallControl>();
-                if (!pendingCallControl.Build(this.Config.AssistantConfigs))
+                ICallControl callControl = serviceProvider.GetRequiredService<ICallControl>();
+                if (!callControl.Build(this.Config.AssistantConfigs))
                 {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", pendingCallControl.ModelName);
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", callControl.ModelName);
                     return false;
                 }
-                providers.SetCallControl(pendingCallControl);
-                pendingCallControl = null;
+                providers.SetCallControl(callControl);
                 #endregion
 
                 #region Dtmf Input
-                pendingDtmfInput = this.ServiceProvider.GetRequiredService<IDtmfInput>();
-                if (!pendingDtmfInput.Build(ModelSetting.Empty))
+                IDtmfInput dtmfInput = serviceProvider.GetRequiredService<IDtmfInput>();
+                if (!dtmfInput.Build(ModelSetting.Empty))
                 {
-                    this.Logger.LogError("无法构建 {modelName} 提供程序。", pendingDtmfInput.ModelName);
+                    this.Logger.LogError("无法构建 {modelName} 提供程序。", dtmfInput.ModelName);
                     return false;
                 }
-                providers.SetDtmfInput(pendingDtmfInput);
-                pendingDtmfInput = null; 
+                providers.SetDtmfInput(dtmfInput);
                 #endregion
 
                 return true;
@@ -278,26 +270,6 @@ namespace Agent.Telephone.Management
             {
                 this.Logger.LogError(exception, "设备 {deviceId} 的 Provider 初始化失败。", deviceContext.DeviceId);
                 return false;
-            }
-            finally
-            {
-                pendingAudioProcessor?.Dispose();
-                if (pendingVad is { IsSherpaModel: false })
-                {
-                    pendingVad.Dispose();
-                }
-                if (pendingAsr is { IsSherpaModel: false })
-                {
-                    pendingAsr.Dispose();
-                }
-                pendingLlm?.Dispose();
-                if (pendingTts is { IsSherpaModel: false })
-                {
-                    pendingTts.Dispose();
-                }
-                pendingOfflineDialogue?.Dispose();
-                pendingCallControl?.Dispose();
-                pendingDtmfInput?.Dispose();
             }
         }
 

@@ -3,21 +3,21 @@ using System.Text.Json.Serialization;
 using Agent.Telephone;
 using Agent.Telephone.Abstractions;
 using Agent.Telephone.Abstractions.Configs;
-using Agent.Telephone.Sample.Server;
 using Agent.Telephone.Sample.Server.FunctionTools;
-using Agent.Telephone.Sample.Server.FunctionTools.Codex;
 using Agent.Telephone.Sample.Server.MessageStore;
+using Figgle.Fonts;
 using Microsoft.Extensions.Hosting;
 
-
+#if DEBUG
 Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Development");
+#endif
 
 IHost? serverHost = null;
 // 获取服务引擎构建器
 IServerBuilder serverBuilder = EngineFactory.CreateAgentTelephoneBuilder();
 try
 {
-    Console.WriteLine(StartupMessage.Message);
+    Console.WriteLine(FiggleFonts.Standard.Render("Agent.Telephone"));
 
     string configJson = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "configs", "config.json"));
 
@@ -42,7 +42,9 @@ try
             }
         }
 
-        SqliteMessageStore messageStore = new(new());
+        SqliteMessageStoreOptions sqliteMessageStoreOptions = new SqliteMessageStoreOptions();
+
+        SqliteMessageStore messageStore = new(sqliteMessageStoreOptions);
         await messageStore.CleanupConversationMessagesAsync(DateTimeOffset.UtcNow);
 
         // 开始初始化服务
@@ -52,7 +54,12 @@ try
             .WithPrivateFunctionTools<GetWeather>()
             .WithPrivateFunctionTools<AssistantSwitch>()
             .WithPrivateFunctionTools<HangupCall>()
-            .WithPrivateFunctionTools<CodexAssistant>()
+            .WithCodexAssistant(options =>
+            {
+                options.ThreadDatabasePath = sqliteMessageStoreOptions.DatabasePath;
+                options.ModelName = "gpt-5.6-luna";
+                options.ReasoningEffort = "medium";
+            })
             // 多媒体文件格式支持
             .WithMedia(
                 useFFmpegAudioMixer: true,
@@ -73,13 +80,12 @@ catch (Exception ex)
 }
 finally
 {
-    if (serverHost is not null)
-    {
-        await serverHost.StopAsync();
-    }
     Console.WriteLine("The server stopped.");
-    Console.WriteLine("Press any key to exit...");
-    Console.ReadKey();
+    if (!Console.IsInputRedirected)
+    {
+        Console.WriteLine("Press any key to exit...");
+        Console.ReadKey();
+    }
 }
 
 #region Lenient String Converter

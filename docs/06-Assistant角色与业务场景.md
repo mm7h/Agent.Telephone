@@ -134,13 +134,13 @@ DTMF 输入有两类用途：
 
 `10088` 将 `RunCodexTaskAsync` 暴露给电话中的模型。工具会：
 
-1. 使用 `CODEX_PATH` 指向已登录的本机 Codex CLI，并按 `CODEX_MODEL` 和 `CODEX_REASONING_EFFORT` 在固定工作目录中运行任务。
+1. 使用 `.WithCodexAssistant(options => ...)` 配置已登录的本机 Codex CLI、模型和推理强度，并在固定的运行目录 `data/codex` 中运行任务。
 2. 首次调用创建 Thread；后续调用按 `UserAor + AssistantNumber` 续接已保存的 ID。用户明确开始新任务时，才通过 `startNewTask: true` 创建并关联新 Thread。
-3. 只把本次任务写入标准输入，并仅取 `--output-last-message` 文件中的最终回复。
+3. 只把本次任务写入 App Server 标准输入，并从 JSON-RPC 的最终 assistant 消息中取得回复。
 4. 用户仍在线时正常播报结果；用户已经挂断时，沿用离线 Turn 的回拨/未读留言投递。
 5. 不能在电话中批准命令、文件变更、权限、App 操作或回答 Codex 追问。
 
-这项能力的风险仍高于普通问答。OpenAI 官方文档说明 `codex exec` 默认使用只读沙箱；示例虽然通过 `--skip-git-repo-check` 允许非 Git 工作目录，但没有覆盖沙箱默认值。服务必须在受控目录和低权限账户下运行，且只将工具授权给专用号码。具体会话行为见 [10-Codex助手](10-Codex助手.md)，安全要求见 [08-安全、隐私与生产运行边界](08-安全、隐私与生产运行边界.md)。
+这项能力的风险仍高于普通问答。扩展明确以只读沙箱和 `approvalPolicy: "never"` 启动 App Server；服务仍必须在受控目录和低权限账户下运行，且只将工具授权给专用号码。具体会话行为见 [10-Codex助手](10-Codex助手.md)，安全要求见 [08-安全、隐私与生产运行边界](08-安全、隐私与生产运行边界.md)。
 
 ## ✅ 7. 场景验收清单
 

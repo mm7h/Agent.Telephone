@@ -36,6 +36,8 @@ namespace Agent.Telephone.Management
         private readonly Dictionary<Type, IEnumerable<FunctionToolMethodMetadata>> _globalFunctionToolMethodMetadata;
         private readonly Dictionary<Type, IEnumerable<FunctionToolMethodMetadata>> _privateFunctionToolMethodMetadata;
 
+        private readonly object _releaseLock = new();
+        private Task? _releaseTask;
         private bool _hasFunctionTools = false;
 
         public FunctionToolManager(
@@ -65,7 +67,23 @@ namespace Agent.Telephone.Management
             try
             {
                 List<IFunctionTool> globalFunctionTools = this.ServiceProvider.GetServices<IFunctionTool>().ToList();
-                List<IPrivateFunctionTool> privateFunctionTools = this.ServiceProvider.GetServices<IPrivateFunctionTool>().ToList();
+                List<IPrivateFunctionTool> privateFunctionTools;
+                AsyncServiceScope metadataScope = this.ServiceProvider.CreateAsyncScope();
+                try
+                {
+                    privateFunctionTools = metadataScope.ServiceProvider.GetServices<IPrivateFunctionTool>().ToList();
+                    foreach (IPrivateFunctionTool instance in privateFunctionTools)
+                    {
+                        Type instanceType = instance.GetType();
+                        this._privateFunctionToolMethodMetadata.Add(
+                            instanceType,
+                            this.ExtractTypeMetadata(instance, instanceType).ToArray());
+                    }
+                }
+                finally
+                {
+                    metadataScope.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
 
                 foreach (IFunctionTool item in globalFunctionTools)
                 {
@@ -79,27 +97,15 @@ namespace Agent.Telephone.Management
                         this._globalFunctionToolMethodMetadata.Add(
                             instanceType,
                             this.ExtractTypeMetadata(instance, instanceType).ToArray());
-                        instance.OnFunctionToolInitializedAsync().AsTask().GetAwaiter().GetResult();
-
                         this._globalFunctionTools.Add(instance);
-                    }
-                }
-
-                foreach (IPrivateFunctionTool instance in privateFunctionTools)
-                {
-                    Type instanceType = instance.GetType();
-                    this._privateFunctionToolMethodMetadata.Add(
-                        instanceType,
-                        this.ExtractTypeMetadata(instance, instanceType).ToArray());
-                    if (instance is IDisposable disposable)
-                    {
-                        disposable.Dispose();
+                        instance.OnFunctionToolInitializedAsync().AsTask().GetAwaiter().GetResult();
                     }
                 }
 
                 this._hasFunctionTools = this._globalFunctionToolMethodMetadata.Any() || this._privateFunctionToolMethodMetadata.Any();
                 if (!this.ValidateDtmfToolDefinitions() || !this.ValidateAllowedTools())
                 {
+                    this.ReleaseGlobalTools();
                     return false;
                 }
 
@@ -142,6 +148,12 @@ namespace Agent.Telephone.Management
                 this.Logger.LogWarning("设备 {DeviceId} 没有活动呼叫，无法为其注册 FunctionTool", deviceContext.DeviceId);
                 return true;
             }
+            if (!activeCall.TryAcquireUse(out IDisposable? lease) || lease is null)
+            {
+                return false;
+            }
+            using IDisposable callLease = lease;
+            AIAgentContext agentContext = activeCall.AIAgentContext;
             IAssistantControl assistantControl = new AssistantControlAdapter(activeCall);
             foreach (FunctionTool instance in this._globalFunctionTools)
             {
@@ -152,12 +164,12 @@ namespace Agent.Telephone.Management
 
                 foreach (FunctionToolMethodMetadata methodMeta in methodMetas.Where(method => this.IsAllowed(activeCall.AssistantConfig, instance.GetType(), method)))
                 {
-                    FunctionToolRegistration registration = this.BuildRegistration(instance, methodMeta, activeCall.AIAgentContext);
-                    activeCall.AIAgentContext.PrivateProvider.AddFunctionToolRegistration(registration);
+                    FunctionToolRegistration registration = this.BuildRegistration(instance, methodMeta, agentContext);
+                    agentContext.PrivateProvider.AddFunctionToolRegistration(registration);
                 }
             }
 
-            Dictionary<Type, IPrivateFunctionTool> privateFunctionTools = this.ServiceProvider.GetServices<IPrivateFunctionTool>().ToDictionary(i => i.GetType());
+            Dictionary<Type, IPrivateFunctionTool> privateFunctionTools = agentContext.ServiceProvider.GetServices<IPrivateFunctionTool>().ToDictionary(i => i.GetType());
             bool initializedToolsOwned = false;
             List<PrivateFunctionTool> initializedTools = [];
             try
@@ -199,12 +211,12 @@ namespace Agent.Telephone.Management
 
                     foreach (FunctionToolMethodMetadata methodMeta in allowedMethods)
                     {
-                        FunctionToolRegistration registration = this.BuildRegistration(instance, methodMeta, activeCall.AIAgentContext);
-                        activeCall.AIAgentContext.PrivateProvider.AddFunctionToolRegistration(instance, registration);
+                        FunctionToolRegistration registration = this.BuildRegistration(instance, methodMeta, agentContext);
+                        agentContext.PrivateProvider.AddFunctionToolRegistration(instance, registration);
                     }
                 }
 
-                activeCall.AIAgentContext.PrivateProvider.SetPrivateFunctionToolLifetime(
+                agentContext.PrivateProvider.SetPrivateFunctionToolLifetime(
                     new PrivateFunctionToolLifetime(initializedTools, this.Logger));
                 initializedToolsOwned = true;
                 return true;
@@ -223,25 +235,6 @@ namespace Agent.Telephone.Management
                     }
                 }
                 throw;
-            }
-            finally
-            {
-                foreach (IPrivateFunctionTool tool in privateFunctionTools.Values)
-                {
-                    if (tool is IDisposable disposable &&
-                        (tool is not PrivateFunctionTool privateTool ||
-                         !initializedTools.Contains(privateTool)))
-                    {
-                        try
-                        {
-                            disposable.Dispose();
-                        }
-                        catch (Exception disposeException)
-                        {
-                            this.Logger.LogError(disposeException, "释放未使用的通话级 FunctionTool {ToolType} 时失败。", tool.GetType().FullName);
-                        }
-                    }
-                }
             }
         }
 
@@ -284,6 +277,7 @@ namespace Agent.Telephone.Management
         {
             DtmfKey dtmfKeys = methodMeta.Behavior?.DtmfKeys ?? DtmfKey.None;
             string? dtmfPrompt = methodMeta.Behavior?.DtmfPrompt;
+            string? preExecutionPrompt = methodMeta.Behavior?.PreExecutionPrompt;
             string description = methodMeta.Description ?? methodMeta.FunctionName;
             if (dtmfKeys != DtmfKey.None)
             {
@@ -320,7 +314,8 @@ namespace Agent.Telephone.Management
                 aiFunction,
                 metadata,
                 methodMeta.Behavior?.DefaultAction ?? ToolAction.Continue,
-                dtmfKeys);
+                dtmfKeys,
+                preExecutionPrompt);
         }
 
         private static string BuildDtmfToolInstruction()
@@ -503,18 +498,6 @@ namespace Agent.Telephone.Management
                 {
                     errors.Add(exception);
                 }
-
-                if (tool is IDisposable disposable)
-                {
-                    try
-                    {
-                        disposable.Dispose();
-                    }
-                    catch (Exception exception)
-                    {
-                        errors.Add(exception);
-                    }
-                }
             }
 
             if (errors.Count > 0)
@@ -523,30 +506,33 @@ namespace Agent.Telephone.Management
             }
         }
 
-        private void ReleaseGlobalTools()
+        public Task StopAsync()
+        {
+            lock (this._releaseLock)
+            {
+                return this._releaseTask ??= this.ReleaseGlobalToolsAsync();
+            }
+        }
+
+        private async Task ReleaseGlobalToolsAsync()
         {
             foreach (FunctionTool instance in this._globalFunctionTools)
             {
                 try
                 {
-                    instance.OnFunctionToolReleasedAsync()
-                        .AsTask()
-                        .GetAwaiter()
-                        .GetResult();
+                    await instance.OnFunctionToolReleasedAsync();
                 }
                 catch (Exception exception)
                 {
                     this.Logger.LogError(exception, "释放全局 FunctionTool {ToolType} 失败。", instance.GetType().FullName);
                 }
-                finally
-                {
-                    if (instance is IDisposable disposable)
-                    {
-                        disposable.Dispose();
-                    }
-                }
             }
             this._globalFunctionTools.Clear();
+        }
+
+        private void ReleaseGlobalTools()
+        {
+            this.StopAsync().GetAwaiter().GetResult();
         }
         #endregion
 
@@ -555,7 +541,7 @@ namespace Agent.Telephone.Management
             this.ReleaseGlobalTools();
         }
 
-        private sealed class PrivateFunctionToolLifetime : IDisposable
+        private sealed class PrivateFunctionToolLifetime : IAsyncDisposable
         {
             private IReadOnlyList<PrivateFunctionTool>? _tools;
             private readonly ILogger _logger;
@@ -566,7 +552,7 @@ namespace Agent.Telephone.Management
                 this._logger = logger;
             }
 
-            public void Dispose()
+            public async ValueTask DisposeAsync()
             {
                 IReadOnlyList<PrivateFunctionTool>? tools =
                     Interlocked.Exchange(ref this._tools, null);
@@ -577,7 +563,7 @@ namespace Agent.Telephone.Management
 
                 try
                 {
-                    FunctionToolManager.ReleasePrivateToolsAsync(tools).GetAwaiter().GetResult();
+                    await FunctionToolManager.ReleasePrivateToolsAsync(tools);
                 }
                 catch (Exception exception)
                 {

@@ -1,6 +1,8 @@
+using Agent.Telephone.Codex.Abstractions.Common.Configs;
+using Agent.Telephone.Codex.Abstractions.Common.Models;
 using Microsoft.Data.Sqlite;
 
-namespace Agent.Telephone.Sample.Server.FunctionTools.Codex
+namespace Agent.Telephone.Codex.Persistence
 {
     internal sealed class CodexThreadStore
     {
@@ -8,11 +10,11 @@ namespace Agent.Telephone.Sample.Server.FunctionTools.Codex
         private readonly SqliteConnectionStringBuilder _connectionStringBuilder;
         private bool _initialized;
 
-        internal CodexThreadStore(string databasePath)
+        public CodexThreadStore(CodexAssistantOptions options)
         {
             this._connectionStringBuilder = new SqliteConnectionStringBuilder
             {
-                DataSource = Path.GetFullPath(databasePath),
+                DataSource = options.ThreadDatabasePath,
                 Mode = SqliteOpenMode.ReadWriteCreate,
                 Cache = SqliteCacheMode.Shared,
                 Pooling = true,
@@ -20,21 +22,18 @@ namespace Agent.Telephone.Sample.Server.FunctionTools.Codex
             };
         }
 
-        internal async Task<string?> GetThreadIdAsync(string userAor, string assistantNumber, CancellationToken cancellationToken)
+        internal async Task<CodexConversationId?> GetConversationIdAsync(string userAor, string assistantNumber, CancellationToken cancellationToken)
         {
             await using SqliteConnection connection = await this.OpenConnectionAsync(cancellationToken);
             await using SqliteCommand command = connection.CreateCommand();
             command.CommandText = "SELECT ThreadId FROM CodexThreads WHERE UserAor = $userAor AND AssistantNumber = $assistantNumber;";
             command.Parameters.AddWithValue("$userAor", userAor);
             command.Parameters.AddWithValue("$assistantNumber", assistantNumber);
-            return await command.ExecuteScalarAsync(cancellationToken) as string;
+            string? value = await command.ExecuteScalarAsync(cancellationToken) as string;
+            return string.IsNullOrWhiteSpace(value) ? null : new CodexConversationId(value);
         }
 
-        internal async Task SaveThreadIdAsync(
-            string userAor,
-            string assistantNumber,
-            string threadId,
-            CancellationToken cancellationToken)
+        internal async Task SaveConversationIdAsync(string userAor, string assistantNumber, CodexConversationId conversationId, CancellationToken cancellationToken)
         {
             await using SqliteConnection connection = await this.OpenConnectionAsync(cancellationToken);
             await using SqliteCommand command = connection.CreateCommand();
@@ -45,7 +44,7 @@ namespace Agent.Telephone.Sample.Server.FunctionTools.Codex
                 """;
             command.Parameters.AddWithValue("$userAor", userAor);
             command.Parameters.AddWithValue("$assistantNumber", assistantNumber);
-            command.Parameters.AddWithValue("$threadId", threadId);
+            command.Parameters.AddWithValue("$threadId", conversationId.Value);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -63,6 +62,7 @@ namespace Agent.Telephone.Sample.Server.FunctionTools.Codex
             {
                 return;
             }
+
             await s_initializationGate.WaitAsync(cancellationToken);
             try
             {
@@ -70,6 +70,13 @@ namespace Agent.Telephone.Sample.Server.FunctionTools.Codex
                 {
                     return;
                 }
+
+                string? directory = Path.GetDirectoryName(this._connectionStringBuilder.DataSource);
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
                 await using SqliteConnection connection = new(this._connectionStringBuilder.ConnectionString);
                 await connection.OpenAsync(cancellationToken);
                 await using SqliteCommand command = connection.CreateCommand();

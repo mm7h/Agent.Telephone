@@ -416,6 +416,7 @@ public sealed class DtmfInputTests
     {
         var transport = new SIPTransport();
         var device = new DeviceContext(
+            TestServices.ScopeFactory,
             transport,
             new DeviceRegistrationRecord(
                 "1001",

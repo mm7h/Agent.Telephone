@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 
 using System.Text;
 using Agent.Telephone.Abstractions.Common.Contexts;
@@ -10,6 +11,9 @@ namespace Agent.Telephone.Common.Contexts
 {
     internal class AIAgentContext : IDisposable
     {
+        private readonly AsyncServiceScope _serviceScope;
+        private readonly object _lifetimeLock = new();
+        private Task? _disposeTask;
         private readonly ActiveCallContext _activeCallContext;
         private readonly List<OfflineDialogueTurn> _completedOnlineTurns = [];
         private Func<string, string, string, CancellationToken, Task<bool>>? _synthesizePrompt;
@@ -17,6 +21,7 @@ namespace Agent.Telephone.Common.Contexts
 
         public AIAgentContext(ActiveCallContext activeCallContext)
         {
+            this._serviceScope = activeCallContext.DeviceContext.ServiceScopeFactory.CreateAsyncScope();
             this._activeCallContext = activeCallContext;
             this.HandlerPipeline = new HandlerPipeline();
             this.PrivateProvider = new PrivateProvider(this._activeCallContext);
@@ -24,6 +29,7 @@ namespace Agent.Telephone.Common.Contexts
             this.CurrentDialingNumber = activeCallContext.DialedNumber;
             this.ChatHistory = [];
         }
+        public IServiceProvider ServiceProvider => this._serviceScope.ServiceProvider;
         public HandlerPipeline HandlerPipeline { get; }
         public PrivateProvider PrivateProvider { get; }
         public string AssistantPrompt { get; set; }
@@ -51,6 +57,41 @@ namespace Agent.Telephone.Common.Contexts
 
             audioProcessor.StartInitialGreeting(this._activeCallContext, this._synthesizePrompt);
             return true;
+        }
+
+        public async Task<bool> PlayToolExecutionPromptAsync(string prompt, CancellationToken cancellationToken)
+        {
+            if (this._synthesizePrompt is null || this._activeCallContext.CallToken.IsCancellationRequested)
+            {
+                return false;
+            }
+
+            using CancellationTokenSource playbackCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, this._activeCallContext.CallToken);
+            playbackCts.CancelAfter(TimeSpan.FromSeconds(30));
+            Task<bool> playbackCompleted = this._activeCallContext.BeginPromptPlayback();
+            if (playbackCompleted.IsCompleted)
+            {
+                return false;
+            }
+
+            try
+            {
+                bool synthesized = await this._synthesizePrompt(
+                    prompt,
+                    $"tool-{this._activeCallContext.TurnId}",
+                    $"tool-{Guid.NewGuid():N}",
+                    playbackCts.Token);
+                return synthesized && await playbackCompleted.WaitAsync(playbackCts.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // 挂断或提示音超时只终止播放，后续长任务仍可生成回复。
+                return false;
+            }
+            finally
+            {
+                this._activeCallContext.CompletePromptPlayback(fullyPlayed: false);
+            }
         }
 
         public async Task<DtmfInputResult> RequestDtmfInteractionAsync(
@@ -158,13 +199,34 @@ namespace Agent.Telephone.Common.Contexts
             this._completedOnlineTurns.Remove(turn);
         }
 
-        public async Task DisposeAsync()
+        public Task DisposeAsync()
         {
-            await this.HandlerPipeline.DisposeAsync();
-            this._synthesizePrompt = null;
-            this.PrivateProvider.Dispose();
-            this.ChatHistory.Clear();
-            this._completedOnlineTurns.Clear();
+            lock (this._lifetimeLock)
+            {
+                return this._disposeTask ??= this.DisposeCoreAsync();
+            }
+        }
+
+        private async Task DisposeCoreAsync()
+        {
+            try
+            {
+                await this.HandlerPipeline.DisposeAsync();
+            }
+            finally
+            {
+                try
+                {
+                    this._synthesizePrompt = null;
+                    await this.PrivateProvider.DisposeAsync();
+                    this.ChatHistory.Clear();
+                    this._completedOnlineTurns.Clear();
+                }
+                finally
+                {
+                    await this._serviceScope.DisposeAsync();
+                }
+            }
         }
 
         public void Dispose()

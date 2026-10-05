@@ -76,7 +76,7 @@ namespace Agent.Telephone.Handlers.SIPHandlers
             this.ActiveCallContext.DeviceContext.CloseCallSession(this.ActiveCallContext);
         }
 
-        public override void Dispose()
+        protected override void DisposeResources()
         {
             ActiveCallContext activeCall = this.ActiveCallContext;
             if (activeCall is not null)

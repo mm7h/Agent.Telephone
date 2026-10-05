@@ -3,6 +3,7 @@ using Agent.Telephone.Abstractions.Persistence;
 using Agent.Telephone.Common.Enums;
 using Agent.Telephone.Helpers;
 using Agent.Telephone.Providers;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SIPSorcery.SIP;
@@ -14,6 +15,8 @@ namespace Agent.Telephone.Common.Contexts
     {
         private readonly SIPTransport _sipTransport;
         private readonly ILogger _logger;
+        private readonly HashSet<ActiveCallContext> _calls = [];
+        private bool _stopping;
         private readonly object _callSessionLock = new();
         private readonly object _registrationLock = new();
         private ActiveCallContext? _activeCall;
@@ -28,6 +31,7 @@ namespace Agent.Telephone.Common.Contexts
         private string? _historyPersistenceCallId;
 
         public DeviceContext(
+            IServiceScopeFactory serviceScopeFactory,
             SIPTransport sipTransport,
             SIPRequest sipRequest,
             SIPURI contact,
@@ -35,6 +39,7 @@ namespace Agent.Telephone.Common.Contexts
             List<AssistantConfig> availableAssistants,
             ILogger? logger = null)
         {
+            this.ServiceScopeFactory = serviceScopeFactory;
             this._sipTransport = sipTransport;
             this._logger = logger ?? NullLogger.Instance;
 
@@ -47,6 +52,7 @@ namespace Agent.Telephone.Common.Contexts
         }
 
         public DeviceContext(
+            IServiceScopeFactory serviceScopeFactory,
             SIPTransport sipTransport,
             DeviceRegistrationRecord registration,
             List<AssistantConfig> availableAssistants,
@@ -54,6 +60,7 @@ namespace Agent.Telephone.Common.Contexts
         {
             ArgumentNullException.ThrowIfNull(registration);
 
+            this.ServiceScopeFactory = serviceScopeFactory;
             this._sipTransport = sipTransport;
             this._logger = logger ?? NullLogger.Instance;
             this.DeviceId = registration.DeviceId;
@@ -72,6 +79,7 @@ namespace Agent.Telephone.Common.Contexts
             this._registrationState = RegistrationState.Registered;
         }
 
+        internal IServiceScopeFactory ServiceScopeFactory { get; }
         public string DeviceId { get; }
         public DateTimeOffset LoginTime { get; }
         public DateTimeOffset LastActivityTime { get; private set; }
@@ -187,7 +195,7 @@ namespace Agent.Telephone.Common.Contexts
         {
             lock (this._callSessionLock)
             {
-                if (this._activeCall is not null || this._callbackActive || this._errorPromptActive || this._backgroundReplyCount > 0 || this._persistenceCount > 0)
+                if (this._stopping || this._activeCall is not null || this._callbackActive || this._errorPromptActive || this._backgroundReplyCount > 0 || this._persistenceCount > 0)
                 {
                     activeCall = null;
                     return false;
@@ -328,7 +336,7 @@ namespace Agent.Telephone.Common.Contexts
         {
             lock (this._callSessionLock)
             {
-                if (this._activeCall is not null || this._callbackActive || this._errorPromptActive)
+                if (this._stopping || this._activeCall is not null || this._callbackActive || this._errorPromptActive)
                 {
                     return false;
                 }
@@ -343,7 +351,7 @@ namespace Agent.Telephone.Common.Contexts
         {
             lock (this._callSessionLock)
             {
-                if (this._activeCall is not null || this._callbackActive || this._errorPromptActive ||
+                if (this._stopping || this._activeCall is not null || this._callbackActive || this._errorPromptActive ||
                     this._backgroundReplyCount > 0 || this._persistenceCount > 0)
                 {
                     return false;
@@ -406,7 +414,7 @@ namespace Agent.Telephone.Common.Contexts
         {
             lock (this._callSessionLock)
             {
-                if (!this._callbackActive || this._activeCall is not null)
+                if (this._stopping || !this._callbackActive || this._activeCall is not null)
                 {
                     activeCall = null;
                     return false;
@@ -637,6 +645,77 @@ namespace Agent.Telephone.Common.Contexts
                 this._registration?.IsExpired(now) == true)
             {
                 this._registrationState = RegistrationState.Expired;
+            }
+        }
+
+        internal void TrackCall(ActiveCallContext call)
+        {
+            lock (this._callSessionLock)
+            {
+                ObjectDisposedException.ThrowIf(this._stopping, this);
+                this._calls.Add(call);
+            }
+            _ = this.ObserveCallDisposalAsync(call);
+        }
+
+        private async Task ObserveCallDisposalAsync(ActiveCallContext call)
+        {
+            try
+            {
+                await call.Disposal;
+            }
+            catch (Exception exception)
+            {
+                this._logger.LogError(exception, "释放通话 {CallId} 资源失败。", call.CallId);
+            }
+            finally
+            {
+                lock (this._callSessionLock)
+                {
+                    this._calls.Remove(call);
+                }
+            }
+        }
+
+        public async Task StopAsync(CancellationToken cancellationToken)
+        {
+            ActiveCallContext[] calls;
+            lock (this._callSessionLock)
+            {
+                this._stopping = true;
+                calls = this._calls.ToArray();
+            }
+            List<Exception> errors = [];
+            try
+            {
+                this.CloseCallSession();
+            }
+            catch (Exception exception)
+            {
+                errors.Add(exception);
+            }
+            foreach (ActiveCallContext call in calls)
+            {
+                try
+                {
+                    call.Stop();
+                }
+                catch (Exception exception)
+                {
+                    errors.Add(exception);
+                }
+            }
+            try
+            {
+                await Task.WhenAll(calls.Select(call => call.Disposal)).WaitAsync(cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                errors.Add(exception);
+            }
+            if (errors.Count > 0)
+            {
+                throw new AggregateException(errors);
             }
         }
 

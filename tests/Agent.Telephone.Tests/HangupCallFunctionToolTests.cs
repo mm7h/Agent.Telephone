@@ -23,7 +23,7 @@ public sealed class HangupCallFunctionToolTests
 
         Assert.True(callControl.HangupAfterReplyRequested);
         Assert.False(callControl.HangupRequested);
-        Assert.Equal(ToolAction.Continue, result.Next);
+        Assert.Equal(ToolAction.DirectResponse, result.Next);
         Assert.False(string.IsNullOrWhiteSpace(result.Result));
         Assert.Equal(result.Result, result.Response);
     }

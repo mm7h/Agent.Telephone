@@ -246,6 +246,17 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
             }
         }
 
+        public async Task OnToolExecutionPromptAsync(long turnId, OutSegment segment, CancellationToken cancellationToken)
+        {
+            DialogueTurnContext context = this.GetTurnContext(turnId);
+            await this.EnsureOfflinePersistenceAsync(context.Turn, cancellationToken);
+            if (!context.Turn.IsOfflineDelivery)
+            {
+                bool played = await this.ActiveCallContext.AIAgentContext.PlayToolExecutionPromptAsync(segment.Content, cancellationToken);
+                this.Logger.LogDebug("工具执行前提示播放完成，TurnId {TurnId}，成功 {Played}。", turnId, played);
+            }
+        }
+
         public async Task OnCompletedAsync(long turnId, CancellationToken cancellationToken)
         {
             DialogueTurnContext context = this.GetTurnContext(turnId);
@@ -353,26 +364,13 @@ namespace Agent.Telephone.Handlers.AIAdapterHandlers
                     return;
                 }
 
-                Interlocked.CompareExchange(
-                    ref this._deferredHangupSegment,
-                    new DeferredHangupSegment(segment.Content, segment.ParagraphId, segment.SentenceId),
-                    null);
+                DeferredHangupSegment? previous = this._deferredHangupSegment;
+                string content = previous is null ? segment.Content : $"{previous.Content.TrimEnd('。')}。{segment.Content}";
+                this._deferredHangupSegment = new DeferredHangupSegment(content, previous?.ParagraphId ?? segment.ParagraphId, previous?.SentenceId ?? segment.SentenceId);
             }
         }
 
         private sealed record DeferredHangupSegment(string Content, string? ParagraphId, string? SentenceId);
 
-        public override void Dispose()
-        {
-            if (this._llm is not null)
-            {
-                this._llm.UnregisterDevice(this.ActiveCallContext);
-            }
-            if (this._offlineDialogue is not null)
-            {
-                this._offlineDialogue.UnregisterDevice(this.ActiveCallContext);
-            }
-            base.Dispose();
-        }
     }
 }

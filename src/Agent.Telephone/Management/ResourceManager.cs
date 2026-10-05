@@ -58,13 +58,6 @@ namespace Agent.Telephone.Management
             return audioFileCaching.Load();
         }
 
-        public override void Dispose()
-        {
-            this.ServiceProvider.GetRequiredService<IVadOnnxModel>().Dispose();
-            this.ServiceProvider.GetRequiredService<IAudioFileCaching>().Dispose();
-            this.ServiceProvider.GetRequiredService<IAudioPromptPlayer>().Dispose();
-        }
-
         private ModelSetting GetSelectedSetting(string selectedModelType, ModelConfig config)
         {
             string selectedModel = config.SelectedDefaultSettings[selectedModelType];

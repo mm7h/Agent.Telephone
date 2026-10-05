@@ -48,6 +48,7 @@ public sealed class SipRegistrarInboundTests
         using SIPTransport transport = new();
         SIPRequest register = CreateRegisterRequest("sip:1001@192.0.2.10:5060", 300, 300);
         using var device = new DeviceContext(
+            TestServices.ScopeFactory,
             transport,
             register,
             SIPURI.ParseSIPURI("sip:1001@192.0.2.10:5060"),
@@ -141,6 +142,7 @@ public sealed class SipRegistrarInboundTests
         using SIPTransport transport = new();
         SIPRequest register = CreateRegisterRequest("sip:1001@192.0.2.10:5060", 300, 300);
         using var device = new DeviceContext(
+            TestServices.ScopeFactory,
             transport,
             register,
             SIPURI.ParseSIPURI("sip:1001@192.0.2.10:5060"),
@@ -165,6 +167,7 @@ public sealed class SipRegistrarInboundTests
         using SIPTransport transport = new();
         SIPRequest register = CreateRegisterRequest("sip:1001@192.0.2.10:5060", 300, 300);
         using var device = new DeviceContext(
+            TestServices.ScopeFactory,
             transport,
             register,
             SIPURI.ParseSIPURI("sip:1001@192.0.2.10:5060"),
@@ -213,6 +216,7 @@ public sealed class SipRegistrarInboundTests
         using SIPTransport transport = new();
         SIPRequest register = CreateRegisterRequest("sip:1001@192.0.2.10:5060", 300, 300);
         using var device = new DeviceContext(
+            TestServices.ScopeFactory,
             transport,
             register,
             SIPURI.ParseSIPURI("sip:1001@192.0.2.10:5060"),

@@ -18,6 +18,7 @@ namespace Agent.Telephone.Management
         private readonly IStore _connectionStore;
         private readonly ITelephoneStore? _telephoneStore;
         private readonly object _deviceLock = new();
+        private bool _stopping;
         private readonly TransferReservationRegistry _reservations;
 
         public DeviceContextManager(
@@ -45,6 +46,17 @@ namespace Agent.Telephone.Management
 
         public override bool BuildComponent() => true;
 
+        public Task StopAsync(CancellationToken cancellationToken)
+        {
+            DeviceContext[] devices;
+            lock (this._deviceLock)
+            {
+                this._stopping = true;
+                devices = this._connectionStore.Get<DeviceContext>(static _ => true).ToArray();
+            }
+            return Task.WhenAll(devices.Select(device => device.StopAsync(cancellationToken)));
+        }
+
         public override async Task OnSIPDeviceRegisteringAsync(SIPTransport sipTransport, SIPRequest sipRequest)
         {
             (SIPURI contact, int expiresSeconds) = sipRequest.GetRegistration();
@@ -62,6 +74,7 @@ namespace Agent.Telephone.Management
                 DateTimeOffset now = DateTimeOffset.Now;
                 if (this._telephoneStore is not null)
                 {
+                    ObjectDisposedException.ThrowIf(this._stopping, this);
                     DeviceContext? existing = this.GetSIPDeviceById(sipRequest);
                     DateTimeOffset registeredAt = existing?.Registration?.RegisteredAt ?? now;
                     await this._telephoneStore.SaveDeviceRegistrationAsync(new DeviceRegistrationRecord(
@@ -93,11 +106,13 @@ namespace Agent.Telephone.Management
                 {
                     lock (this._deviceLock)
                     {
+                        ObjectDisposedException.ThrowIf(this._stopping, this);
                         if (!this._connectionStore.Contains(registration.DeviceId))
                         {
                             this._connectionStore.Add(
                                 registration.DeviceId,
                                 new DeviceContext(
+                                    this.ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
                                     this.ServiceProvider.GetRequiredService<SIPTransport>(),
                                     registration,
                                     this.Config.AssistantConfigs,
@@ -121,6 +136,7 @@ namespace Agent.Telephone.Management
         {
             lock (this._deviceLock)
             {
+                ObjectDisposedException.ThrowIf(this._stopping, this);
                 DeviceContext? existing = this.GetSIPDeviceById(sipRequest);
                 if (existing is not null)
                 {
@@ -138,15 +154,20 @@ namespace Agent.Telephone.Management
             SIPURI contact,
             int expiresSeconds)
         {
-            DeviceContext deviceContext = new DeviceContext(
-                sipTransport,
-                sipRequest,
-                contact,
-                expiresSeconds,
-                this.Config.AssistantConfigs,
-                this.Logger);
-            this._connectionStore.Add(deviceContext.DeviceId, deviceContext);
-            return deviceContext;
+            lock (this._deviceLock)
+            {
+                ObjectDisposedException.ThrowIf(this._stopping, this);
+                DeviceContext deviceContext = new DeviceContext(
+                    this.ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
+                    sipTransport,
+                    sipRequest,
+                    contact,
+                    expiresSeconds,
+                    this.Config.AssistantConfigs,
+                    this.Logger);
+                this._connectionStore.Add(deviceContext.DeviceId, deviceContext);
+                return deviceContext;
+            }
         }
 
         public DeviceContext? GetSIPDeviceById(SIPRequest sipRequest)
@@ -307,6 +328,10 @@ namespace Agent.Telephone.Management
 
             lock (this._deviceLock)
             {
+                if (this._stopping)
+                {
+                    return false;
+                }
                 DeviceContext? candidate = this._connectionStore
                     .Get<DeviceContext>(item =>
                         item.TryGetActiveRegistration(out RegistrationBinding? binding) &&

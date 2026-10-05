@@ -6,6 +6,10 @@ using Agent.Telephone.Common.Constants;
 using Agent.Telephone.Common.Contexts;
 using Agent.Telephone.Media.Abstractions.Dtos;
 using Agent.Telephone.Providers;
+using Agent.Telephone.Abstractions.FunctionTools;
+using Agent.Telephone.FunctionTools;
+using Agent.Telephone.Management;
+using Microsoft.Extensions.DependencyInjection;
 using Agent.Telephone.Providers.OfflineDialogue;
 using Agent.Telephone.Sample.Server.MessageStore;
 using Microsoft.Data.Sqlite;
@@ -170,6 +174,7 @@ public sealed class OfflineDialogueProviderTests : IDisposable
             string contactUri = $"sip:{DeviceNumber}@{phoneChannel.ListeningSIPEndPoint.GetIPEndPoint()}";
             SIPRequest register = CreateRegisterRequest();
             using var device = new DeviceContext(
+                TestServices.ScopeFactory,
                 callbackTransport,
                 register,
                 SIPURI.ParseSIPURI(contactUri),
@@ -216,6 +221,95 @@ public sealed class OfflineDialogueProviderTests : IDisposable
             }
 
             return Task.CompletedTask;
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CallbackInitializationFailure_HangsUpAndReleasesSessionAsync(bool throwDuringToolInitialization)
+    {
+        using SIPTransport callbackTransport = new();
+        using SIPTransport phoneTransport = new();
+        SIPUDPChannel phoneChannel = new(System.Net.IPAddress.Loopback, 0);
+        phoneTransport.AddSIPChannel(phoneChannel);
+        callbackTransport.AddSIPChannel(new SIPUDPChannel(System.Net.IPAddress.Loopback, 0));
+        CallbackInitializationState state = new() { ThrowDuringInitialization = throwDuringToolInitialization };
+        await using ServiceProvider services = new ServiceCollection()
+            .AddSingleton(state)
+            .AddTransient<IPrivateFunctionTool, CallbackInitializationTool>()
+            .BuildServiceProvider();
+        TelephoneConfig config = new()
+        {
+            SIPConfig = new SIPConfig { CallbackTimeoutSeconds = 5 },
+            AssistantConfigs = [new AssistantConfig { DialingNumber = AssistantNumber, AllowedTools = [nameof(CallbackInitializationTool.Execute)] }],
+        };
+        using DeviceContext device = new(
+            services.GetRequiredService<IServiceScopeFactory>(),
+            callbackTransport,
+            CreateRegisterRequest(),
+            SIPURI.ParseSIPURI($"sip:{DeviceNumber}@{phoneChannel.ListeningSIPEndPoint.GetIPEndPoint()}"),
+            300,
+            config.AssistantConfigs);
+        state.Device = device;
+        FunctionToolManager tools = new(NullLoggerFactory.Instance, services, config, NullLogger<FunctionToolManager>.Instance);
+        Assert.True(tools.BuildComponent());
+        SqliteMessageStore store = this.CreateStore();
+        await using DefaultOfflineDialogue provider = new(
+            store,
+            callbackTransport,
+            tools,
+            new ProviderManager(services, config, NullLogger<ProviderManager>.Instance),
+            new HandlerManager(services, config, NullLogger<HandlerManager>.Instance),
+            config,
+            NullLogger<DefaultOfflineDialogue>.Instance);
+        OfflineDialogueTurn turn = new("callback-turn", $"sip:{DeviceNumber}@device.test", AssistantNumber, "user-message", "assistant-message", "问题");
+        await store.SaveConversationMessageAsync(new ConversationMessage
+        {
+            Id = turn.AssistantMessageId,
+            TurnId = turn.TurnId,
+            UserAor = turn.UserAor,
+            AssistantNumber = AssistantNumber,
+            Role = ConversationRole.Assistant,
+            FullText = "等待投递的回复",
+            State = DeliveryState.Unread,
+        });
+        SIPUserAgent phone = new(phoneTransport, null, false);
+        AudioExtrasSource phoneSource = new(new AudioEncoder(SupportedAudioFormats.SupportedSDPAudioFormat), new AudioSourceOptions { AudioSource = AudioSourcesEnum.None });
+        using VoIPMediaSession phoneMedia = new(new MediaEndPoints { AudioSource = phoneSource });
+        TaskCompletionSource hungup = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        phone.OnCallHungup += _ => hungup.TrySetResult();
+        phoneTransport.SIPTransportRequestReceived += OnRequestAsync;
+        try
+        {
+            await provider.StartProactiveCallAsync(device, turn);
+            ActiveCallContext call = await state.Initialized.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(phone.IsCallActive);
+            state.Continue.TrySetResult();
+
+            await hungup.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(await WaitUntilAsync(() => Task.FromResult(device.ActiveCall is null && !device.IsCallOccupied)));
+            await call.Disposal.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, state.DisposeCount);
+            Assert.Single(await store.GetUnreadAssistantMessagesAsync(turn.UserAor, AssistantNumber));
+            Assert.True(device.TryBeginCallback());
+            device.EndCallback();
+        }
+        finally
+        {
+            state.Continue.TrySetResult();
+            phoneTransport.SIPTransportRequestReceived -= OnRequestAsync;
+            device.CloseCallSession();
+            device.EndCallback();
+            phone.Hangup();
+        }
+
+        async Task OnRequestAsync(SIPEndPoint local, SIPEndPoint remote, SIPRequest request)
+        {
+            if (request.Method == SIPMethodsEnum.INVITE)
+            {
+                Assert.True(await phone.Answer(phone.AcceptCall(request), phoneMedia));
+            }
         }
     }
 
@@ -449,6 +543,7 @@ public sealed class OfflineDialogueProviderTests : IDisposable
         SIPTransport transport = new();
         SIPRequest register = CreateRegisterRequest();
         DeviceContext device = new(
+            TestServices.ScopeFactory,
             transport,
             register,
             SIPURI.ParseSIPURI($"sip:{DeviceNumber}@192.0.2.10:5060"),
@@ -522,6 +617,40 @@ public sealed class OfflineDialogueProviderTests : IDisposable
 
             this._device.Dispose();
             this._transport.Dispose();
+        }
+    }
+
+    private sealed class CallbackInitializationState
+    {
+        public bool ThrowDuringInitialization { get; init; }
+        public DeviceContext Device { get; set; } = null!;
+        public TaskCompletionSource<ActiveCallContext> Initialized { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Continue { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int DisposeCount { get; set; }
+    }
+
+    private sealed class CallbackInitializationTool(CallbackInitializationState state) : PrivateFunctionTool, IDisposable
+    {
+        private bool _initialized;
+        public string Execute() => "done";
+
+        public override async ValueTask OnFunctionToolInitializedAsync()
+        {
+            this._initialized = true;
+            state.Initialized.SetResult(state.Device.ActiveCall!);
+            await state.Continue.Task;
+            if (state.ThrowDuringInitialization)
+            {
+                throw new InvalidOperationException("Tool initialization failed.");
+            }
+        }
+
+        public void Dispose()
+        {
+            if (this._initialized)
+            {
+                state.DisposeCount++;
+            }
         }
     }
 
