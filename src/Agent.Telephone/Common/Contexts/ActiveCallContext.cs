@@ -430,13 +430,13 @@ namespace Agent.Telephone.Common.Contexts
             }
         }
 
-        [MemberNotNull(nameof(this.UserAgent))]
+        [MemberNotNull(nameof(UserAgent))]
         private void CreateSIPUserAgent(SIPTransport sipTransport)
         {
             this.UserAgent = new SIPUserAgent(sipTransport, null, true);
         }
 
-        [MemberNotNull(nameof(this.VoIPRTP))]
+        [MemberNotNull(nameof(VoIPRTP))]
         private void CreateVoIPMediaSession()
         {
             AudioEncoder audioEncoder = new AudioEncoder(SupportedAudioFormats.SupportedSDPAudioFormat);
@@ -503,7 +503,7 @@ namespace Agent.Telephone.Common.Contexts
                 ?? sipRequest.Header.To?.ToURI?.User;
         }
 
-        [MemberNotNull(nameof(this.AIAgentContext), nameof(this.AssistantConfig))]
+        [MemberNotNull(nameof(AIAgentContext), nameof(AssistantConfig))]
         private void CreateAIAgentContext()
         {
             if (string.IsNullOrWhiteSpace(this.DialedNumber))
