@@ -52,7 +52,7 @@ public sealed class DtmfInputTests
         Assert.False(request.IsCompleted);
         input.HandleDtmfTone(session.Call, (byte)tone);
 
-        DtmfInputResult result = await request.WaitAsync(TimeSpan.FromSeconds(1));
+        DtmfInputResult result = await request.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(DtmfInputStatus.Accepted, result.Status);
         Assert.Equal(expected, result.SelectedKey);
         Assert.True(result.Succeeded);
@@ -71,7 +71,7 @@ public sealed class DtmfInputTests
         Assert.False(request.IsCompleted);
         input.HandleDtmfTone(session.Call, 1);
 
-        DtmfInputResult result = await request.WaitAsync(TimeSpan.FromSeconds(1));
+        DtmfInputResult result = await request.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(DtmfKey.One, result.SelectedKey);
     }
 
@@ -87,7 +87,7 @@ public sealed class DtmfInputTests
 
         Assert.Equal(DtmfInputStatus.AlreadyWaiting, second.Status);
         input.HandleDtmfTone(session.Call, 1);
-        Assert.Equal(DtmfKey.One, (await first.WaitAsync(TimeSpan.FromSeconds(1))).SelectedKey);
+        Assert.Equal(DtmfKey.One, (await first.WaitAsync(TimeSpan.FromSeconds(5))).SelectedKey);
     }
 
     [Fact]

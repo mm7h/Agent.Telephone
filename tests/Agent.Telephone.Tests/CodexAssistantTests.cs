@@ -217,11 +217,6 @@ public sealed class CodexAssistantTests
 
         public Fixture(string mode = "success")
         {
-            if (!OperatingSystem.IsWindows())
-            {
-                throw Xunit.Sdk.SkipException.ForSkip("The fake Codex app-server fixture uses Windows PowerShell.");
-            }
-
             Directory.CreateDirectory(this.Root);
             string script = """
                 [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -273,8 +268,19 @@ public sealed class CodexAssistantTests
                 """;
             File.WriteAllText(Path.Combine(this.Root, "fixture.ps1"), script, new System.Text.UTF8Encoding(true));
             File.WriteAllText(Path.Combine(this.Root, "mode.txt"), mode);
-            string powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
-            File.WriteAllText(Path.Combine(this.Root, "codex.cmd"), $"@echo off\r\nset \"CODEX_TEST_ARGUMENTS=%*\"\r\n\"{powershell}\" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%~dp0fixture.ps1\"\r\nexit /b %errorlevel%\r\n");
+            if (OperatingSystem.IsWindows())
+            {
+                string powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
+                File.WriteAllText(Path.Combine(this.Root, "codex.cmd"), $"@echo off\r\nset \"CODEX_TEST_ARGUMENTS=%*\"\r\n\"{powershell}\" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%~dp0fixture.ps1\"\r\nexit /b %errorlevel%\r\n");
+            }
+            else
+            {
+                string launcher = Path.Combine(this.Root, "codex");
+                File.WriteAllText(launcher,
+                    "#!/bin/sh\nexport CODEX_TEST_ARGUMENTS=\"$*\"\nexec pwsh -NoProfile -NonInteractive -File \"$(dirname \"$0\")/fixture.ps1\"\n",
+                    new System.Text.UTF8Encoding(false));
+                File.SetUnixFileMode(launcher, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
         }
 
         public CodexThreadStore Store => new(this.CreateOptions());
@@ -283,7 +289,7 @@ public sealed class CodexAssistantTests
         {
             CodexAssistantOptions options = new()
             {
-                ExecutablePath = Path.Combine(this.Root, "codex.cmd"),
+                ExecutablePath = Path.Combine(this.Root, OperatingSystem.IsWindows() ? "codex.cmd" : "codex"),
                 ThreadDatabasePath = Path.Combine(this.Root, "messages.db"),
                 ModelName = "test-model",
                 ReasoningEffort = "high",
