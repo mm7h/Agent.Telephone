@@ -1,5 +1,4 @@
 /.vscode/
-/.github/
 /.vs/
 *.user
 *.pubxml
@@ -9,3 +8,6 @@
 **/[Bb][Ii][Nn]/
 **/[Oo][Bb][Jj]/
 /AGENTS.md
+
+/artifacts/
+**/__pycache__/

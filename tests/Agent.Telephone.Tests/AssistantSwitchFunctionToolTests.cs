@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Agent.Telephone.Abstractions.Common.Contexts;
 using Agent.Telephone.Abstractions.Common.Enums;
 using Agent.Telephone.Abstractions.Configs;
@@ -58,7 +60,7 @@ public sealed class AssistantSwitchFunctionToolTests
     }
 
     [Fact]
-    public async Task SwitchAssistantAsync_UsesEmptyTargetWhenTheModelOmitsTheArgumentAsync()
+    public async Task SwitchAssistantAsync_RejectsMissingTargetWithoutCallingControlAsync()
     {
         var callControl = new RecordingAssistantControl();
         var tool = new AssistantSwitch
@@ -69,9 +71,14 @@ public sealed class AssistantSwitchFunctionToolTests
         MethodInfo method = typeof(AssistantSwitch).GetMethod(nameof(AssistantSwitch.SwitchAssistantAsync))!;
         AIFunction function = AIFunctionFactory.Create(method, tool, new AIFunctionFactoryOptions());
 
-        await function.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object?>()), CancellationToken.None);
+        object? result = await function.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object?>()), CancellationToken.None);
 
-        Assert.Equal(string.Empty, callControl.TargetAssistantNumber);
+        JsonElement payload = Assert.IsType<JsonElement>(result);
+        FunctionReturn<AssistantSwitchResult> response = payload.Deserialize<FunctionReturn<AssistantSwitchResult>>(
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true, Converters = { new JsonStringEnumConverter() } })!;
+        Assert.Equal(AssistantSwitchStatus.Failed, response.Result!.Status);
+        Assert.Equal(string.Empty, response.Result.TargetAssistantNumber);
+        Assert.Equal(0, callControl.SwitchCount);
     }
 
     private sealed class RecordingAssistantControl : IAssistantControl
@@ -80,9 +87,11 @@ public sealed class AssistantSwitchFunctionToolTests
         public string? AssistantNumber => "10000";
         public bool IsCallActive => true;
         public string? TargetAssistantNumber { get; private set; }
+        public int SwitchCount { get; private set; }
 
         public Task<AssistantSwitchResult> SwitchAssistantAsync(string targetAssistantNumber, CancellationToken cancellationToken = default)
         {
+            this.SwitchCount++;
             this.TargetAssistantNumber = targetAssistantNumber;
             return Task.FromResult(new AssistantSwitchResult(
                 AssistantSwitchStatus.InvalidTarget,

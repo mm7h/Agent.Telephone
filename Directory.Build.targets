@@ -1,0 +1,61 @@
+<Project>
+  <PropertyGroup Condition="'$(IsPackable)' != 'false' and '$(OutputType)' == 'Library'">
+    <PackageIcon>logo.png</PackageIcon>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(IsPackable)' != 'false' and '$(OutputType)' == 'Library'">
+    <None Include="$(MSBuildThisFileDirectory)docs/assets/logo.png" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+  <!-- ReleasePackage is opt-in; ordinary build/test/publish retain SDK defaults. -->
+  <PropertyGroup Condition="'$(ReleasePackage)' == 'true' and '$(OutputType)' == 'Exe' and '$(IsTestProject)' != 'true'">
+    <SelfContained>true</SelfContained>
+    <UseAppHost>true</UseAppHost>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Agent.Telephone.Sample.Server'">
+    <None Update="configs/config.json;configs/AssistantPrompts/**/*.md"
+          CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+
+  <Target Name="PrepareTelephoneReleaseNativeLibraries" BeforeTargets="_ComputeFilesToBundle"
+          Condition="'$(ReleasePackage)' == 'true' and '$(PublishSingleFile)' == 'true'">
+    <Error Condition="'$(RuntimeIdentifier)' != 'win-x64' and '$(RuntimeIdentifier)' != 'win-arm64' and '$(RuntimeIdentifier)' != 'linux-x64' and '$(RuntimeIdentifier)' != 'linux-arm64'"
+           Text="ReleasePackage requires win-x64, win-arm64, linux-x64 or linux-arm64." />
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(ResolvedFileToPublish.Extension)' == '.lib' or '%(ResolvedFileToPublish.Extension)' == '.a' or '%(ResolvedFileToPublish.Extension)' == '.exp' or '%(ResolvedFileToPublish.Extension)' == '.pdb'" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_TelephoneLinux Condition="$([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('linux-'))">true</_TelephoneLinux>
+      <_TelephonePreparedNative>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'release-native', '$(RuntimeIdentifier)'))</_TelephonePreparedNative>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(_TelephoneLinux)' == 'true'">
+      <!-- Source Sherpa's ORT from its own package, never from the conflict-selected publish list. -->
+      <_TelephoneSherpaApi Include="@(ResolvedFileToPublish)" Condition="'%(Filename)%(Extension)' == 'libsherpa-onnx-c-api.so'" />
+      <_TelephoneMicrosoftOrtVersion Include="@(PackageVersion)" Condition="'%(Identity)' == 'Microsoft.ML.OnnxRuntime'" />
+    </ItemGroup>
+    <Error Condition="'$(_TelephoneLinux)' == 'true' and '@(_TelephoneSherpaApi->Count())' != '1'"
+           Text="Expected one resolved Sherpa native API library for $(RuntimeIdentifier)." />
+    <PropertyGroup Condition="'$(_TelephoneLinux)' == 'true'">
+      <_TelephoneSherpaSource>@(_TelephoneSherpaApi->'%(RootDir)%(Directory)')</_TelephoneSherpaSource>
+      <_TelephoneMicrosoftOrt>$(NuGetPackageRoot)microsoft.ml.onnxruntime/@(_TelephoneMicrosoftOrtVersion->'%(Version)')/runtimes/$(RuntimeIdentifier)/native/libonnxruntime.so</_TelephoneMicrosoftOrt>
+    </PropertyGroup>
+    <Error Condition="'$(_TelephoneLinux)' == 'true' and !Exists('$(_TelephoneMicrosoftOrt)')"
+           Text="The centrally versioned Microsoft ONNX Runtime native library was not restored: $(_TelephoneMicrosoftOrt)" />
+    <Error Condition="'$(_TelephoneLinux)' == 'true' and !$([MSBuild]::IsOSPlatform('Linux'))"
+           Text="Linux release publishing requires Linux and patchelf. Use the matching GitHub runner." />
+    <Exec Condition="'$(_TelephoneLinux)' == 'true'"
+          Command="sh &quot;$(MSBuildThisFileDirectory).github/workflows/scripts/prepare-sherpa.sh&quot; &quot;$(RuntimeIdentifier)&quot; &quot;$(_TelephoneSherpaSource)&quot; &quot;$(_TelephonePreparedNative)&quot;" />
+    <ItemGroup Condition="'$(_TelephoneLinux)' == 'true'">
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Filename)%(Extension)' == 'libsherpa-onnx-c-api.so'" />
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Filename)%(Extension)' == 'libonnxruntime.so'" />
+      <ResolvedFileToPublish Include="$(_TelephoneMicrosoftOrt)" RelativePath="libonnxruntime.so" CopyToPublishDirectory="PreserveNewest" />
+      <ResolvedFileToPublish Include="$(_TelephonePreparedNative)/libsherpa-onnx-c-api.so" RelativePath="libsherpa-onnx-c-api.so" CopyToPublishDirectory="PreserveNewest" />
+      <ResolvedFileToPublish Include="$(_TelephonePreparedNative)/sherpa/libsherpa-onnxruntime.so" RelativePath="sherpa/libsherpa-onnxruntime.so" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+</Project>

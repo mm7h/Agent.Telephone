@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Version Condition="'$(Version)' == ''">0.1.0</Version>
+    <Authors>mm7h</Authors>
+    <RepositoryUrl>https://github.com/mm7h/Agent.Telephone</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/mm7h/Agent.Telephone</PackageProjectUrl>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+</Project>
