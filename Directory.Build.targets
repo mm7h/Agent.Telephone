@@ -21,6 +21,27 @@
           CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 
+  <!-- Ordinary Linux hosts also need separate ORT libraries before dotnet run/test. -->
+  <Target Name="PrepareTelephoneLinuxBuildNativeLibraries" AfterTargets="Build"
+          Condition="$([MSBuild]::IsOSPlatform('Linux')) and ('$(OutputType)' == 'Exe' or '$(IsTestProject)' == 'true') and '$(ReleasePackage)' != 'true'">
+    <PropertyGroup>
+      <_TelephoneBuildRid Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</_TelephoneBuildRid>
+      <_TelephoneBuildRid Condition="'$(_TelephoneBuildRid)' == ''">$(NETCoreSdkPortableRuntimeIdentifier)</_TelephoneBuildRid>
+      <_TelephoneBuildRid Condition="'$(_TelephoneBuildRid)' == ''">$(NETCoreSdkRuntimeIdentifier)</_TelephoneBuildRid>
+      <_TelephoneBuildNativeDirectory Condition="'$(RuntimeIdentifier)' == ''">$(TargetDir)runtimes/$(_TelephoneBuildRid)/native</_TelephoneBuildNativeDirectory>
+      <_TelephoneBuildNativeDirectory Condition="'$(RuntimeIdentifier)' != ''">$(TargetDir)</_TelephoneBuildNativeDirectory>
+    </PropertyGroup>
+    <Error Condition="'$(_TelephoneBuildRid)' != 'linux-x64' and '$(_TelephoneBuildRid)' != 'linux-arm64'"
+           Text="Linux native library isolation requires linux-x64 or linux-arm64." />
+    <ItemGroup>
+      <_TelephoneBuildSherpaVersion Include="@(PackageVersion)" Condition="'%(Identity)' == 'org.k2fsa.sherpa.onnx'" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_TelephoneBuildSherpaSource>$(NuGetPackageRoot)org.k2fsa.sherpa.onnx.runtime.$(_TelephoneBuildRid)/@(_TelephoneBuildSherpaVersion->'%(Version)')/runtimes/$(_TelephoneBuildRid)/native</_TelephoneBuildSherpaSource>
+    </PropertyGroup>
+    <Exec Command="sh &quot;$(MSBuildThisFileDirectory).github/workflows/scripts/prepare-sherpa.sh&quot; &quot;$(_TelephoneBuildRid)&quot; &quot;$(_TelephoneBuildSherpaSource)&quot; &quot;$(_TelephoneBuildNativeDirectory)&quot;" />
+  </Target>
+
   <Target Name="PrepareTelephoneReleaseNativeLibraries" BeforeTargets="_ComputeFilesToBundle"
           Condition="'$(ReleasePackage)' == 'true' and '$(PublishSingleFile)' == 'true'">
     <Error Condition="'$(RuntimeIdentifier)' != 'win-x64' and '$(RuntimeIdentifier)' != 'win-arm64' and '$(RuntimeIdentifier)' != 'linux-x64' and '$(RuntimeIdentifier)' != 'linux-arm64'"
